@@ -38,36 +38,36 @@ export default function About() {
             transition={{ duration: 0.6 }}
             className="lg:col-span-6 xl:col-span-5 flex flex-col items-start w-full"
           >
-            <span className="text-gold tracking-[0.25em] uppercase text-xs font-semibold mb-2 sm:mb-3 block font-mono">
+            <span className="text-gold tracking-[0.2em] uppercase text-[11px] sm:text-xs font-semibold mb-2 block font-mono">
               {content.subtitle}
             </span>
 
-            <h2 className="font-heading text-2xl sm:text-3xl md:text-4xl lg:text-5xl text-white font-extrabold mb-3 sm:mb-4 leading-tight">
+            <h2 className="font-heading text-xl sm:text-2xl md:text-3xl lg:text-[2.25rem] text-white font-extrabold mb-3 leading-snug">
               {content.titleLine1} <br />
               <span className="text-gradient-gold">{content.titleLine2}</span>
             </h2>
 
-            <p className="text-gray-300 text-sm sm:text-base leading-relaxed mb-6 font-light max-w-2xl">
+            <p className="text-gray-300 text-xs sm:text-sm leading-relaxed mb-5 font-light max-w-xl">
               {content.narrative}
             </p>
             
             {/* Compact Pillars */}
-            <div className="grid grid-cols-2 gap-2.5 sm:gap-3.5 w-full max-w-xl mb-6 sm:mb-8">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 w-full max-w-xl mb-5 sm:mb-6">
               {(content.pillars || defaultAboutContent.pillars).map((item, i) => {
                 const Icon = pillarIcons[i % pillarIcons.length];
                 return (
                   <div 
                     key={i} 
-                    className="p-3 bg-black-rich border border-white/10 hover:border-gold/40 transition-colors group flex items-center gap-3"
+                    className="p-2.5 sm:p-3 bg-black-rich border border-white/10 hover:border-gold/40 transition-colors group flex items-center gap-2.5"
                   >
-                    <div className="w-8 h-8 bg-gold/10 border border-gold/30 flex items-center justify-center text-gold group-hover:bg-gold group-hover:text-black-pure transition-colors shrink-0">
-                      <Icon size={16} />
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 bg-gold/10 border border-gold/30 flex items-center justify-center text-gold group-hover:bg-gold group-hover:text-black-pure transition-colors shrink-0">
+                      <Icon size={14} />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-white text-xs sm:text-sm font-semibold truncate group-hover:text-gold-light transition-colors">
+                      <h3 className="text-white text-xs font-semibold truncate group-hover:text-gold-light transition-colors">
                         {item.title}
                       </h3>
-                      <p className="text-gray-400 text-[11px] truncate hidden sm:block">
+                      <p className="text-gray-400 text-[10.5px] truncate hidden sm:block">
                         {item.subtitle}
                       </p>
                     </div>
@@ -77,18 +77,18 @@ export default function About() {
             </div>
 
             {/* CTAs */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
               <a
                 href="#quote"
-                className="inline-flex items-center justify-center gap-2.5 bg-gold hover:bg-gold-light text-black-pure font-bold px-6 sm:px-8 py-3 sm:py-3.5 text-xs uppercase tracking-widest transition-all duration-300 shadow-[0_0_20px_rgba(212,175,55,0.25)] hover:shadow-[0_0_30px_rgba(212,175,55,0.4)] whitespace-nowrap active:scale-95"
+                className="inline-flex items-center justify-center gap-2 bg-gold hover:bg-gold-light text-black-pure font-bold px-5 sm:px-6 py-2.5 sm:py-3 text-[11px] sm:text-xs uppercase tracking-wider transition-all duration-300 shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.35)] whitespace-nowrap active:scale-95 rounded-sm"
               >
                 <span>Request Quotation</span>
-                <ArrowRight size={14} className="stroke-[2.5]" />
+                <ArrowRight size={13} className="stroke-[2.2]" />
               </a>
               <a
                 href="#products"
                 onClick={navigateToCreations}
-                className="inline-flex items-center justify-center px-6 sm:px-8 py-3 sm:py-3.5 border border-white/20 hover:border-gold/60 bg-black-rich/50 text-gray-200 hover:text-gold text-xs uppercase tracking-widest transition-all whitespace-nowrap active:scale-95 text-center cursor-pointer"
+                className="inline-flex items-center justify-center px-5 sm:px-6 py-2.5 sm:py-3 border border-white/20 hover:border-gold/60 bg-black-rich/50 text-gray-200 hover:text-gold text-[11px] sm:text-xs uppercase tracking-wider transition-all whitespace-nowrap active:scale-95 text-center cursor-pointer rounded-sm"
               >
                 Explore Showcase
               </a>

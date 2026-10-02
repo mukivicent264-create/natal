@@ -28,7 +28,7 @@ export default function Hero() {
   };
 
   return (
-    <section id="home" className="relative min-h-[80vh] sm:min-h-[85vh] lg:min-h-[88vh] w-full overflow-hidden flex flex-col justify-between pt-24 sm:pt-28 md:pt-30 lg:pt-32 pb-4 sm:pb-6">
+    <section id="home" className="relative min-h-[80vh] sm:min-h-[85vh] lg:min-h-[86vh] w-full overflow-hidden flex flex-col justify-between pt-20 sm:pt-22 md:pt-24 lg:pt-26 pb-4 sm:pb-6">
       {/* Background Container - Cinematic Video & Visual Scrim */}
       <div className="absolute inset-0 z-0 overflow-hidden">
         {/* Left-directional scrim: darker on the left for text legibility, open & clear on the right for video visibility */}
@@ -84,9 +84,9 @@ export default function Hero() {
             initial={{ opacity: 0, x: -25 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, delay: 0.15 }}
-            className="mb-3 sm:mb-5"
+            className="mb-2.5 sm:mb-4"
           >
-            <h1 className="text-2xl sm:text-4xl md:text-5xl lg:text-[3.75rem] font-heading font-extrabold tracking-tight text-white leading-[1.08] sm:leading-[1.05] drop-shadow-[0_4px_16px_rgba(0,0,0,0.9)]">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-[2.65rem] xl:text-[3.15rem] font-heading font-extrabold tracking-tight text-white leading-[1.14] sm:leading-[1.1] drop-shadow-[0_4px_16px_rgba(0,0,0,0.9)]">
               {content.headline1} <br />
               {content.headline2} <br />
               <span className="text-gradient-gold italic font-normal">{content.headline3}</span>
@@ -98,7 +98,7 @@ export default function Hero() {
             initial={{ opacity: 0, x: -25 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, delay: 0.35 }}
-            className="text-gray-200 text-xs sm:text-sm md:text-base max-w-xl mb-5 sm:mb-6 font-light leading-relaxed text-left drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]"
+            className="text-gray-200 text-xs sm:text-sm md:text-[14.5px] max-w-xl mb-4 sm:mb-5 font-light leading-relaxed text-left drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]"
           >
             {content.description}
           </motion.p>
@@ -108,18 +108,18 @@ export default function Hero() {
             initial={{ opacity: 0, x: -25 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, delay: 0.5 }}
-            className="flex flex-col sm:flex-row items-stretch sm:items-center justify-start gap-3 sm:gap-4 w-full sm:w-auto"
+            className="flex flex-col sm:flex-row items-stretch sm:items-center justify-start gap-2.5 sm:gap-3.5 w-full sm:w-auto"
           >
             <a
               href="#quote"
-              className="w-full sm:w-auto px-6 sm:px-8 py-3 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure transition-all duration-300 uppercase tracking-widest text-xs font-bold text-center shadow-[0_0_20px_rgba(212,175,55,0.3)] hover:shadow-[0_0_30px_rgba(212,175,55,0.5)] whitespace-nowrap active:scale-95"
+              className="w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure transition-all duration-300 uppercase tracking-wider text-[11px] sm:text-xs font-bold text-center shadow-[0_0_15px_rgba(212,175,55,0.25)] hover:shadow-[0_0_25px_rgba(212,175,55,0.4)] whitespace-nowrap active:scale-95 rounded-sm"
             >
               {content.primaryCtaText || 'Request Quotation'}
             </a>
             <a
               href="#products"
               onClick={navigateToCreations}
-              className="w-full sm:w-auto px-6 sm:px-8 py-3 border border-white/30 bg-black-pure/60 hover:bg-black-pure/90 backdrop-blur-md text-white hover:border-gold hover:text-gold transition-all duration-300 uppercase tracking-widest text-xs font-medium text-center whitespace-nowrap active:scale-95 shadow-md cursor-pointer"
+              className="w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 border border-white/30 bg-black-pure/60 hover:bg-black-pure/90 backdrop-blur-md text-white hover:border-gold hover:text-gold transition-all duration-300 uppercase tracking-wider text-[11px] sm:text-xs font-medium text-center whitespace-nowrap active:scale-95 shadow-md cursor-pointer rounded-sm"
             >
               {content.secondaryCtaText || 'Explore Showcase'}
             </a>

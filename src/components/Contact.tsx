@@ -76,8 +76,8 @@ export default function Contact() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
         <div className="text-center max-w-3xl mx-auto mb-5 sm:mb-7">
-          <h2 className="text-gold tracking-[0.25em] uppercase text-xs sm:text-sm font-semibold mb-1.5">{content.subtitle || 'Contact Us'}</h2>
-          <h3 className="font-heading text-2xl sm:text-3xl md:text-4xl text-white font-bold uppercase tracking-wider mb-2">{content.title || "Let's Discuss Your Project"}</h3>
+          <h2 className="text-gold tracking-[0.2em] uppercase text-[11px] sm:text-xs font-semibold mb-1.5">{content.subtitle || 'Contact Us'}</h2>
+          <h3 className="font-heading text-xl sm:text-2xl md:text-3xl text-white font-bold uppercase tracking-wider mb-2">{content.title || "Let's Discuss Your Project"}</h3>
           <p className="text-gray-400 font-light text-xs sm:text-sm">
             {content.description}
           </p>
@@ -143,10 +143,10 @@ export default function Contact() {
 
                 <button 
                   type="submit"
-                  className="w-full bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure py-3 px-6 uppercase tracking-widest text-xs font-bold transition-all duration-300 flex items-center justify-center gap-2.5 shadow-[0_0_20px_rgba(212,175,55,0.2)] hover:shadow-[0_0_30px_rgba(212,175,55,0.4)] active:scale-95 cursor-pointer group mt-1"
+                  className="w-full bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure py-2.5 px-5 uppercase tracking-wider text-[11px] sm:text-xs font-bold transition-all duration-300 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.35)] active:scale-95 cursor-pointer group mt-1 rounded-sm"
                 >
                   <span>Send Message</span>
-                  <Send size={15} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                  <Send size={14} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
               </form>
             )}

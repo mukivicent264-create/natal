@@ -33,7 +33,7 @@ function Counter({ from = 0, to, duration = 2, suffix = '' }: { from?: number, t
   }, [inView, from, to, duration]);
 
   return (
-    <span ref={nodeRef} className="font-heading text-2xl md:text-4xl text-white">
+    <span ref={nodeRef} className="font-heading text-xl sm:text-2xl md:text-3xl text-white font-bold">
       {count}{suffix}
     </span>
   );

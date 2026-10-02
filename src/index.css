@@ -14,10 +14,22 @@
 }
 
 html {
-  font-size: 16px;
+  font-size: 15px;
   scroll-behavior: smooth;
   text-size-adjust: 100%;
   -webkit-text-size-adjust: 100%;
+}
+
+@media (min-width: 1440px) {
+  html {
+    font-size: 15.5px;
+  }
+}
+
+@media (min-width: 1920px) {
+  html {
+    font-size: 16px;
+  }
 }
 
 html, body {

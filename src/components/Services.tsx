@@ -224,7 +224,7 @@ export default function Services({ onNavigateToService }: ServicesProps) {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.1 }}
-            className="font-heading text-xl sm:text-2xl md:text-3xl lg:text-4xl text-white font-bold uppercase tracking-wider"
+            className="font-heading text-lg sm:text-xl md:text-2xl lg:text-3xl text-white font-bold uppercase tracking-wider"
           >
             {sectionTitle || 'OUR SERVICES'}
           </motion.h3>

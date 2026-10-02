@@ -226,7 +226,7 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
-              className="font-heading font-bold text-xl sm:text-3xl md:text-4xl text-white mb-2 sm:mb-3 leading-tight tracking-tight"
+              className="font-heading font-bold text-xl sm:text-2xl md:text-3xl text-white mb-2 leading-tight tracking-tight"
             >
               Request A Free{' '}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-gold via-yellow-200 to-amber-500 italic block xs:inline mt-0.5 sm:mt-0 drop-shadow-[0_2px_15px_rgba(212,175,55,0.3)]">
@@ -564,8 +564,8 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
                 </div>
 
                 <div className="pt-2">
-                  <button type="submit" className="w-full py-3.5 sm:py-4 px-4 sm:px-6 bg-gold hover:bg-gold-light text-black-pure uppercase tracking-wider sm:tracking-widest font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2.5 sm:gap-3 cursor-pointer shadow-[0_10px_30px_rgba(212,175,55,0.25)] rounded-none hover:scale-[1.01] active:scale-95">
-                    <Send size={16} className="sm:w-[18px] sm:h-[18px] flex-shrink-0" />
+                  <button type="submit" className="w-full py-2.5 sm:py-3 px-4 sm:px-6 bg-gold hover:bg-gold-light text-black-pure uppercase tracking-wider font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_6px_20px_rgba(212,175,55,0.25)] rounded-sm hover:scale-[1.01] active:scale-95">
+                    <Send size={15} className="flex-shrink-0" />
                     <span className="whitespace-nowrap">Submit Quote</span>
                   </button>
                 </div>

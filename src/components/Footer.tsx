@@ -75,8 +75,8 @@ export default function Footer() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Top Gold Slogan Ribbon */}
-        <div className="bg-gradient-to-r from-gold/25 via-gold/45 to-gold/25 border-2 border-gold py-3.5 sm:py-4 px-4 sm:px-6 text-center mb-7 sm:mb-9 rounded-md shadow-[0_0_30px_rgba(212,175,55,0.25)]">
-          <p className="font-heading text-sm sm:text-base md:text-lg font-extrabold tracking-[0.25em] text-white uppercase drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
+        <div className="bg-gradient-to-r from-gold/25 via-gold/45 to-gold/25 border border-gold py-2.5 sm:py-3 px-4 text-center mb-6 sm:mb-8 rounded-sm shadow-[0_0_20px_rgba(212,175,55,0.2)]">
+          <p className="font-heading text-xs sm:text-sm md:text-base font-extrabold tracking-[0.2em] text-white uppercase drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
             {companyDetails.slogan}
           </p>
         </div>
@@ -86,7 +86,7 @@ export default function Footer() {
           {/* Column 1: Brand, Description, Contacts, Socials */}
           <div className="flex flex-col justify-between">
             <div>
-              <NatalLogo className="h-11 mb-5" />
+              <NatalLogo className="h-8 sm:h-9 mb-4" variant="footer" />
               <p className="text-white text-xs sm:text-sm leading-relaxed mb-6 font-medium">
                 {companyDetails.description}
               </p>

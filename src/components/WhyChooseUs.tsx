@@ -36,7 +36,7 @@ export default function WhyChooseUs() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.1 }}
-            className="font-heading text-2xl sm:text-3xl md:text-4xl text-white font-bold uppercase tracking-wider"
+            className="font-heading text-xl sm:text-2xl md:text-3xl text-white font-bold uppercase tracking-wider"
           >
             {content.title}
           </motion.h3>

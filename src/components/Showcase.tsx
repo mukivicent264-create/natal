@@ -98,7 +98,7 @@ export default function Showcase() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.1 }}
-            className="font-heading text-2xl md:text-4xl text-white"
+            className="font-heading text-xl sm:text-2xl md:text-3xl text-white"
           >
             Featured Interior Creations
           </motion.h2>
@@ -160,13 +160,13 @@ export default function Showcase() {
         </div>
 
         {/* Explore more services button below cards */}
-        <div className="mt-8 sm:mt-10 text-center">
+        <div className="mt-6 sm:mt-8 text-center">
           <a
             href="#creations"
-            className="inline-flex items-center justify-center gap-2.5 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-5 sm:px-8 py-3.5 sm:py-4 font-bold uppercase tracking-wider sm:tracking-[0.2em] text-[10px] sm:text-xs transition-all duration-300 shadow-[0_0_20px_rgba(212,175,55,0.3)] hover:shadow-[0_0_30px_rgba(212,175,55,0.5)] active:scale-95 rounded-none cursor-pointer group whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-2 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-5 sm:px-6 py-2.5 sm:py-3 font-bold uppercase tracking-wider text-[11px] sm:text-xs transition-all duration-300 shadow-[0_0_15px_rgba(212,175,55,0.25)] hover:shadow-[0_0_25px_rgba(212,175,55,0.4)] active:scale-95 rounded-sm cursor-pointer group whitespace-nowrap"
           >
             <span>View All Interior Specialties</span>
-            <ArrowUpRight size={16} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0" />
+            <ArrowUpRight size={14} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0" />
           </a>
         </div>
       </div>
