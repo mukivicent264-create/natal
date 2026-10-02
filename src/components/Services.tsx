@@ -208,7 +208,7 @@ export default function Services({ onNavigateToService }: ServicesProps) {
       {/* Subtle gold grid background motif */}
       <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(#D4AF37_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none"></div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-10">
         
         <div className="text-center mb-4 sm:mb-6 lg:mb-7">
           <motion.h2 

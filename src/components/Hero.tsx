@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { ChevronDown, Film } from 'lucide-react';
 import { useSectionContent, HeroContent, defaultHeroContent } from '../siteContent';
@@ -6,9 +6,11 @@ import { useSectionContent, HeroContent, defaultHeroContent } from '../siteConte
 export default function Hero() {
   const { content } = useSectionContent<HeroContent>('hero', defaultHeroContent);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoLoaded, setVideoLoaded] = useState(false);
+  const [videoError, setVideoError] = useState(false);
 
-  const isVideoMode = content.mediaType !== 'image' && (!!content.backgroundVideo || !!defaultHeroContent.backgroundVideo);
-  const videoSource = content.backgroundVideo || defaultHeroContent.backgroundVideo;
+  const isVideoMode = content.mediaType === 'video' && !!content.backgroundVideo;
+  const videoSource = content.backgroundVideo || '';
   const posterSource = content.backgroundImage || defaultHeroContent.backgroundImage;
 
   const navigateToCreations = (e: React.MouseEvent) => {
@@ -29,56 +31,55 @@ export default function Hero() {
 
   return (
     <section id="home" className="relative min-h-[80vh] sm:min-h-[85vh] lg:min-h-[86vh] w-full overflow-hidden flex flex-col justify-between pt-20 sm:pt-22 md:pt-24 lg:pt-26 pb-4 sm:pb-6">
-      {/* Background Container - Cinematic Video & Visual Scrim */}
+      {/* Background Container - Stunning Luxury Interior & Optional Cinematic Video */}
       <div className="absolute inset-0 z-0 overflow-hidden">
-        {/* Left-directional scrim: darker on the left for text legibility, open & clear on the right for video visibility */}
-        <div className="absolute inset-0 bg-gradient-to-r from-black-pure via-black-pure/85 via-45% to-black-pure/25 z-10 pointer-events-none"></div>
-        {/* Vertical subtle vignette for header and bottom image grounding */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black-pure/90 via-transparent via-50% to-black-pure z-10 pointer-events-none"></div>
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_40%,rgba(212,175,55,0.1)_0%,transparent_60%)] z-10 pointer-events-none"></div>
-        
-        {isVideoMode ? (
-          <div className="w-full h-full relative">
-            <video
-              key={videoSource}
-              ref={videoRef}
-              src={videoSource}
-              autoPlay
-              loop
-              muted
-              playsInline
-              poster={posterSource}
-              className="w-full h-full object-cover object-center filter brightness-95"
-            >
-              <source src={videoSource} type="video/mp4" />
-              <source src={videoSource} type="video/webm" />
-              {/* Fallback image if video fails */}
-              <img
-                src={posterSource}
-                alt="Natal Luxury Interior Architecture"
-                className="w-full h-full object-cover object-center"
-              />
-            </video>
-          </div>
-        ) : (
-          <motion.div
-            initial={{ scale: 1 }}
-            animate={{ scale: [1, 1.05, 1] }}
-            transition={{ duration: 25, ease: 'easeInOut', repeat: Infinity }}
-            className="w-full h-full"
+        {/* Base Luxury Golden Interior Image - Always rendered, guaranteed visible */}
+        <motion.div
+          initial={{ scale: 1 }}
+          animate={{ scale: [1, 1.04, 1] }}
+          transition={{ duration: 25, ease: 'easeInOut', repeat: Infinity }}
+          className="absolute inset-0 w-full h-full"
+        >
+          <img
+            src={posterSource}
+            alt="Natal Luxury Golden Interior Design"
+            className="w-full h-full object-cover object-center filter brightness-[0.98]"
+          />
+        </motion.div>
+
+        {/* Optional Video Overlay (fades in only if video actually loads and plays) */}
+        {isVideoMode && videoSource && !videoError && (
+          <video
+            ref={videoRef}
+            key={videoSource}
+            src={videoSource}
+            autoPlay
+            loop
+            muted
+            playsInline
+            onLoadedData={() => setVideoLoaded(true)}
+            onPlaying={() => setVideoLoaded(true)}
+            onError={() => {
+              setVideoError(true);
+              setVideoLoaded(false);
+            }}
+            className={`absolute inset-0 w-full h-full object-cover object-center filter brightness-95 transition-opacity duration-1000 ${
+              videoLoaded ? 'opacity-100' : 'opacity-0'
+            }`}
           >
-            <img
-              src={posterSource}
-              alt="Luxury Golden Interior Design"
-              className="w-full h-full object-cover object-center"
-            />
-          </motion.div>
+            <source src={videoSource} type="video/mp4" />
+          </video>
         )}
+
+        {/* Golden ambient lighting & soft directional scrims for crisp text readability without obscuring visuals */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black-pure/75 via-black-pure/40 via-40% to-black-pure/15 z-10 pointer-events-none"></div>
+        <div className="absolute inset-0 bg-gradient-to-b from-black-pure/70 via-transparent via-50% to-black-pure/80 z-10 pointer-events-none"></div>
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_45%,rgba(212,175,55,0.12)_0%,transparent_65%)] z-10 pointer-events-none"></div>
       </div>
 
       {/* Main Content (Left-Aligned for Clear Background Video Playback) */}
-      <div className="relative z-20 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-auto pt-2 sm:pt-4 pb-4 sm:pb-6">
-        <div className="max-w-2xl lg:max-w-3xl flex flex-col items-start text-left">
+      <div className="relative z-20 w-full max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 my-auto pt-2 sm:pt-4 pb-4 sm:pb-6">
+        <div className="max-w-2xl lg:max-w-3xl xl:max-w-4xl flex flex-col items-start text-left">
           {/* Main Brand Slogan */}
           <motion.div
             initial={{ opacity: 0, x: -25 }}
@@ -132,7 +133,7 @@ export default function Hero() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6, duration: 0.8 }}
-        className="relative z-20 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-auto pb-4 sm:pb-6"
+        className="relative z-20 w-full max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 mt-auto pb-4 sm:pb-6"
       >
         <div className="w-full">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 md:gap-7 lg:gap-8 w-full">

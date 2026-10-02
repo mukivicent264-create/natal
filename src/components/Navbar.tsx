@@ -287,7 +287,7 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
             : 'bg-gradient-to-b from-black-pure/95 via-black-pure/70 to-transparent py-2 sm:py-2.5 min-h-[54px] sm:min-h-[60px] flex items-center'
         )}
       >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full flex items-center justify-between">
+      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 w-full flex items-center justify-between">
         {/* Logo */}
         <button 
           onClick={() => handleLinkClick('#home', 'home')}

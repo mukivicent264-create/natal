@@ -81,7 +81,7 @@ export default function Showcase() {
 
   return (
     <section id="showcase" className="py-6 sm:py-8 md:py-12 bg-black-pure border-y border-gold/20 relative">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
         <div className="text-center mb-5 sm:mb-7">
           <motion.div
             initial={{ opacity: 0, y: 15 }}

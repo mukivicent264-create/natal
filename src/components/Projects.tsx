@@ -267,7 +267,7 @@ export default function Projects({ onViewProjectSpecs }: ProjectsProps = {}) {
 
   return (
     <section id="projects" className="py-4 sm:py-6 md:py-8 bg-black-pure border-b border-gold/20 relative">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
         {/* Header Title Section */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-4 sm:mb-5 gap-3">
           <div>

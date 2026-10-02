@@ -27,8 +27,8 @@ export default function About() {
 
   return (
     <section id="about" className="py-6 sm:py-8 md:py-12 bg-black-pure relative overflow-hidden border-b border-white/10">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        <div className="grid lg:grid-cols-12 gap-6 lg:gap-8 xl:gap-10 items-center">
+      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-10">
+        <div className="grid lg:grid-cols-12 gap-6 lg:gap-8 xl:gap-12 items-center">
           
           {/* Left: Concise Narrative */}
           <motion.div

@@ -40,7 +40,7 @@ export default function BeforeAfterSection() {
 
   return (
     <section className="py-6 sm:py-8 md:py-12 bg-black-rich border-b border-gold/15">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
         <div className="text-center mb-4 sm:mb-6">
           <motion.h2 
             initial={{ opacity: 0, y: 20 }}
