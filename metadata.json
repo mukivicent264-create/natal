@@ -1,0 +1,6 @@
+{
+  "name": "Natal Interior Design & Construction",
+  "description": "Premium luxury interior design, architectural finishing, custom woodwork, and construction services.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

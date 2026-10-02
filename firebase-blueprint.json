@@ -1,0 +1,146 @@
+{
+  "rules_version": "2",
+  "collections": {
+    "projects": {
+      "description": "Featured creations and projects",
+      "fields": {
+        "title": "string",
+        "category": "string",
+        "desc": "string",
+        "image": "string",
+        "tags": "array",
+        "createdAt": "timestamp"
+      }
+    },
+    "testimonials": {
+      "description": "Client feedback",
+      "fields": {
+        "name": "string",
+        "role": "string",
+        "content": "string",
+        "rating": "number",
+        "image": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "leads": {
+      "description": "Quote requests and contact inquiries",
+      "fields": {
+        "name": "string",
+        "email": "string",
+        "phone": "string",
+        "service": "string",
+        "details": "string",
+        "status": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "users": {
+      "description": "Registered VIP clients and quotation form users",
+      "fields": {
+        "name": "string",
+        "email": "string",
+        "phone": "string",
+        "source": "string",
+        "role": "string",
+        "service": "string",
+        "details": "string",
+        "activities": "array",
+        "activityCount": "number",
+        "lastActive": "string",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      }
+    },
+    "user_activities": {
+      "description": "Chronological audit trail of all user activities including registrations, quotations, contacts, WhatsApp chats, calls, and logins",
+      "fields": {
+        "userId": "string",
+        "userName": "string",
+        "userEmail": "string",
+        "userPhone": "string",
+        "type": "string",
+        "title": "string",
+        "description": "string",
+        "metadata": "object",
+        "timestamp": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "services": {
+      "description": "Services offered in the Our Services section",
+      "fields": {
+        "title": "string",
+        "description": "string",
+        "icon": "string",
+        "features": "array",
+        "featuresText": "string",
+        "image": "string",
+        "order": "number",
+        "originalId": "string",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      }
+    },
+    "transformations": {
+      "description": "Before and After architectural transformation projects",
+      "fields": {
+        "title": "string",
+        "beforeImage": "string",
+        "afterImage": "string",
+        "fitMode": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "media": {
+      "description": "Uploaded media vault storing photos, architectural drawings, blueprints, and video records",
+      "fields": {
+        "name": "string",
+        "type": "string",
+        "category": "string",
+        "url": "string",
+        "thumbnail": "string",
+        "size": "number",
+        "sizeFormatted": "string",
+        "uploadedBy": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "site_settings": {
+      "description": "Custom site settings like section titles and intros",
+      "fields": {
+        "sectionTitle": "string",
+        "sectionSubtitle": "string",
+        "sectionDescription": "string",
+        "hiddenServiceIds": "array",
+        "updatedAt": "timestamp"
+      }
+    },
+    "site_content": {
+      "description": "Dynamic editable site section content (Hero, About, Why Choose Us, Process, Stats, Contact)",
+      "fields": {
+        "sectionId": "string",
+        "data": "object",
+        "updatedAt": "timestamp"
+      }
+    },
+    "admins": {
+      "description": "Authorized administrators",
+      "fields": {
+        "email": "string"
+      }
+    }
+  },
+  "roles": {
+    "admin": {
+      "description": "Site owner with full CMS access",
+      "hasAccess": true,
+      "roleCheck": "request.auth != null && exists(/databases/$(database)/documents/admins/$(request.auth.uid))"
+    },
+    "public": {
+      "description": "Anonymous or public users",
+      "hasAccess": true,
+      "roleCheck": "true"
+    }
+  }
+}
