@@ -267,7 +267,7 @@ export default function Projects({ onViewProjectSpecs }: ProjectsProps = {}) {
 
   return (
     <section id="projects" className="py-4 sm:py-6 md:py-8 bg-black-pure border-b border-gold/20 relative">
-      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
+      <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
         {/* Header Title Section */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-4 sm:mb-5 gap-3">
           <div>
@@ -290,10 +290,10 @@ export default function Projects({ onViewProjectSpecs }: ProjectsProps = {}) {
             {/* Right fade gradient */}
             <div className="absolute right-0 top-0 bottom-0 w-8 sm:w-16 bg-gradient-to-l from-black-rich to-transparent z-10 pointer-events-none" />
 
-            {/* Seamless scrolling track */}
+            {/* Seamless scrolling track with slow, calm luxury pace */}
             <div 
               className="flex items-center gap-2 sm:gap-3 w-max animate-marquee hover:[animation-play-state:paused] active:[animation-play-state:paused]"
-              style={{ animationDuration: '34s' }}
+              style={{ animationDuration: '88s' }}
             >
               {[...categories, ...categories].map((cat, idx) => (
                 <button
@@ -351,7 +351,7 @@ export default function Projects({ onViewProjectSpecs }: ProjectsProps = {}) {
         <div className="mt-5 sm:mt-8 text-center">
           <a
             href="#creations"
-            className="inline-flex items-center gap-2.5 bg-black-pure border border-gold hover:bg-gold hover:text-black-pure text-gold px-4 sm:px-7 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider sm:tracking-[0.2em] transition-all duration-300 shadow-[0_0_20px_rgba(212,175,55,0.2)] rounded-none cursor-pointer whitespace-nowrap"
+            className="h-11 sm:h-12 inline-flex items-center justify-center gap-2.5 bg-black-pure border border-gold hover:bg-gold hover:text-black-pure text-gold px-6 sm:px-8 text-xs sm:text-sm font-bold uppercase tracking-wider sm:tracking-[0.15em] transition-all duration-300 shadow-[0_0_20px_rgba(212,175,55,0.2)] rounded-sm cursor-pointer whitespace-nowrap active:scale-95"
           >
             <span>Explore Full Portfolio Page</span>
             <ArrowRight size={16} />

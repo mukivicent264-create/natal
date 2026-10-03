@@ -76,7 +76,7 @@ export default function NatalLogo({
 
   // 1. If user chose "Logo Image Only" and a logo exists
   if (hasCustomLogo && effectiveType === 'image') {
-    const customMaxH = content.logoHeight ? Math.min(Math.max(content.logoHeight, 22), 60) : undefined;
+    const customMaxH = content.logoHeight ? Math.min(Math.max(content.logoHeight, 24), 70) : undefined;
     return (
       <div className={`flex items-center justify-start ${className}`}>
         <img 
@@ -87,10 +87,10 @@ export default function NatalLogo({
             isSmall 
               ? "max-h-6 sm:max-h-7" 
               : isLarge 
-              ? "max-h-11 sm:max-h-12" 
+              ? "max-h-12 sm:max-h-14" 
               : isFooter
-              ? "max-h-9 sm:max-h-10"
-              : "max-h-7 sm:max-h-8 md:max-h-9"
+              ? "max-h-9 sm:max-h-11"
+              : "max-h-9 sm:max-h-11 md:max-h-12 lg:max-h-13"
           }`}
           style={customMaxH && !isSmall ? { maxHeight: `${customMaxH}px` } : undefined}
         />
@@ -100,7 +100,7 @@ export default function NatalLogo({
 
   // 2. If user chose "Both" (Logo Image + Typography) and logo exists
   if (hasCustomLogo && effectiveType === 'both') {
-    const customMaxH = content.logoHeight ? Math.min(Math.max(content.logoHeight, 20), 50) : undefined;
+    const customMaxH = content.logoHeight ? Math.min(Math.max(content.logoHeight, 22), 60) : undefined;
     return (
       <div className={`flex items-center gap-2 sm:gap-2.5 justify-start group text-left ${className}`}>
         <div className="shrink-0 flex items-center justify-center">
@@ -112,10 +112,10 @@ export default function NatalLogo({
               isSmall 
                 ? "max-h-5 sm:max-h-6" 
                 : isLarge 
-                ? "max-h-9 sm:max-h-10" 
+                ? "max-h-10 sm:max-h-12" 
                 : isFooter
-                ? "max-h-8 sm:max-h-9"
-                : "max-h-6 sm:max-h-7 md:max-h-8"
+                ? "max-h-8 sm:max-h-10"
+                : "max-h-7 sm:max-h-8 md:max-h-9 lg:max-h-10"
             }`}
             style={customMaxH && !isSmall ? { maxHeight: `${customMaxH}px` } : undefined}
           />

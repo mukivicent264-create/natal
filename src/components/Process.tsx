@@ -43,7 +43,7 @@ export default function Process() {
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(212,175,55,0.05)_0%,transparent_70%)] pointer-events-none" />
       <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
 
-      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-10">
+      <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-10">
         
         {/* Header Section */}
         <div className="text-center max-w-3xl mx-auto mb-5 sm:mb-7">
@@ -287,7 +287,7 @@ export default function Process() {
 
           <a
             href="#quote"
-            className="inline-flex items-center justify-center gap-2.5 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-5 sm:px-8 py-3 sm:py-3.5 text-[10px] sm:text-xs font-extrabold uppercase tracking-wider sm:tracking-[0.2em] transition-all duration-300 shadow-[0_0_20px_rgba(212,175,55,0.25)] hover:shadow-[0_0_30px_rgba(212,175,55,0.5)] active:scale-95 shrink-0 cursor-pointer group whitespace-nowrap"
+            className="h-11 sm:h-12 inline-flex items-center justify-center gap-2.5 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-6 sm:px-8 text-xs sm:text-sm font-bold uppercase tracking-wider sm:tracking-[0.15em] transition-all duration-300 shadow-[0_0_20px_rgba(212,175,55,0.25)] hover:shadow-[0_0_30px_rgba(212,175,55,0.5)] active:scale-95 shrink-0 cursor-pointer group whitespace-nowrap rounded-sm"
           >
             <span>Book Consultation</span>
             <ArrowRight size={15} className="group-hover:translate-x-1 transition-transform" />

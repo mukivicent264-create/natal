@@ -74,7 +74,7 @@ export default function Contact() {
       {/* Background Accent */}
       <div className="absolute top-0 right-0 w-1/3 h-full bg-gradient-to-l from-gold/5 to-transparent pointer-events-none"></div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+      <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-10">
         <div className="text-center max-w-3xl mx-auto mb-5 sm:mb-7">
           <h2 className="text-gold tracking-[0.2em] uppercase text-[11px] sm:text-xs font-semibold mb-1.5">{content.subtitle || 'Contact Us'}</h2>
           <h3 className="font-heading text-xl sm:text-2xl md:text-3xl text-white font-bold uppercase tracking-wider mb-2">{content.title || "Let's Discuss Your Project"}</h3>
@@ -83,7 +83,7 @@ export default function Contact() {
           </p>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-6 lg:gap-10 items-start max-w-6xl mx-auto">
+        <div className="grid lg:grid-cols-2 gap-6 lg:gap-12 items-start w-full">
           {/* Contact Form */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -143,7 +143,7 @@ export default function Contact() {
 
                 <button 
                   type="submit"
-                  className="w-full bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure py-2.5 px-5 uppercase tracking-wider text-[11px] sm:text-xs font-bold transition-all duration-300 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.35)] active:scale-95 cursor-pointer group mt-1 rounded-sm"
+                  className="w-full h-11 sm:h-12 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-6 uppercase tracking-wider text-xs sm:text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.35)] active:scale-95 cursor-pointer group mt-1.5 rounded-sm"
                 >
                   <span>Send Message</span>
                   <Send size={14} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />

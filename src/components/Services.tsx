@@ -208,7 +208,7 @@ export default function Services({ onNavigateToService }: ServicesProps) {
       {/* Subtle gold grid background motif */}
       <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(#D4AF37_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none"></div>
 
-      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-10">
+      <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-10">
         
         <div className="text-center mb-4 sm:mb-6 lg:mb-7">
           <motion.h2 
@@ -306,7 +306,7 @@ export default function Services({ onNavigateToService }: ServicesProps) {
         <div className="mt-5 sm:mt-7 text-center">
           <a
             href="#all-services"
-            className="inline-flex items-center justify-center gap-2 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-5 sm:px-7 py-2.5 sm:py-3 font-bold uppercase tracking-wider sm:tracking-[0.2em] text-[10px] sm:text-xs transition-all duration-300 shadow-[0_0_20px_rgba(212,175,55,0.25)] hover:shadow-[0_0_30px_rgba(212,175,55,0.45)] active:scale-95 rounded-none cursor-pointer group whitespace-nowrap"
+            className="h-11 sm:h-12 inline-flex items-center justify-center gap-2 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-6 sm:px-8 font-bold uppercase tracking-wider sm:tracking-[0.15em] text-xs sm:text-sm transition-all duration-300 shadow-[0_0_20px_rgba(212,175,55,0.25)] hover:shadow-[0_0_30px_rgba(212,175,55,0.45)] active:scale-95 rounded-sm cursor-pointer group whitespace-nowrap"
           >
             <span>View More Services</span>
             <ArrowUpRight size={15} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0" />

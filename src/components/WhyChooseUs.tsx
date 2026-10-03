@@ -21,7 +21,7 @@ export default function WhyChooseUs() {
         <div className="absolute inset-0 bg-gradient-to-b from-black-pure via-black-pure/80 to-black-pure z-10" />
       </div>
 
-      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-20">
+      <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-20">
         <div className="text-center mb-5 sm:mb-7">
           <motion.h2 
             initial={{ opacity: 0, y: 15 }}

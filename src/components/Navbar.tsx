@@ -283,26 +283,26 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
         className={cn(
           'fixed top-0 left-0 right-0 z-[200] transition-all duration-300',
           (scrolled || mobileMenuOpen) 
-            ? 'bg-black-rich/98 backdrop-blur-2xl border-b border-gold/20 py-2 sm:py-2.5 min-h-[50px] sm:min-h-[56px] shadow-[0_10px_30px_rgba(0,0,0,0.9)] flex items-center' 
-            : 'bg-gradient-to-b from-black-pure/95 via-black-pure/70 to-transparent py-2 sm:py-2.5 min-h-[54px] sm:min-h-[60px] flex items-center'
+            ? 'bg-black-rich/98 backdrop-blur-2xl border-b border-gold/20 py-4 sm:py-4.5 lg:py-5 min-h-[78px] sm:min-h-[86px] lg:min-h-[92px] shadow-[0_10px_30px_rgba(0,0,0,0.9)] flex items-center' 
+            : 'bg-gradient-to-b from-black-pure/95 via-black-pure/70 to-transparent py-5 sm:py-6 lg:py-7 min-h-[88px] sm:min-h-[98px] lg:min-h-[110px] flex items-center'
         )}
       >
-      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 w-full flex items-center justify-between">
+      <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 flex items-center justify-between">
         {/* Logo */}
         <button 
           onClick={() => handleLinkClick('#home', 'home')}
           className="group focus:outline-none text-left cursor-pointer shrink-0"
         >
-          <NatalLogo className="h-6 sm:h-7 md:h-8 transition-all duration-300" />
+          <NatalLogo className="h-9 sm:h-11 md:h-12 lg:h-13 transition-all duration-300" />
         </button>
 
         {/* Desktop Nav */}
-        <nav className="hidden lg:flex items-center gap-4 xl:gap-6 lg:translate-y-0.5">
+        <nav className="hidden lg:flex items-center gap-5 xl:gap-8 lg:translate-y-0.5">
           {navLinks.map((link) => (
             <button
               key={link.name}
               onClick={() => handleLinkClick(link.href, link.sectionId)}
-              className="text-[11px] xl:text-[11.5px] uppercase tracking-[0.14em] text-gray-300 hover:text-gold transition-colors duration-300 relative group font-medium py-1 cursor-pointer"
+              className="text-xs uppercase tracking-[0.14em] text-gray-300 hover:text-gold transition-colors duration-300 relative group font-medium py-2 cursor-pointer"
             >
               {link.name}
               <span className="absolute -bottom-0.5 left-0 w-0 h-[1.5px] bg-gold transition-all duration-300 group-hover:w-full"></span>
@@ -310,11 +310,11 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
           ))}
         </nav>
 
-        <div className="flex items-center gap-2 sm:gap-3 lg:gap-3 ml-auto lg:ml-0">
+        <div className="flex items-center gap-2.5 sm:gap-3.5 lg:gap-4 ml-auto lg:ml-0">
           {/* Request A Quote Button (Hidden on mobile screen, appears on tablet & desktop) */}
           <button
             onClick={() => handleLinkClick('#quote', 'quote')}
-            className="hidden sm:inline-flex items-center justify-center whitespace-nowrap px-3 py-1.5 border border-gold/50 text-gold hover:bg-gold/10 active:bg-gold/20 hover:border-gold active:scale-95 font-semibold text-[10.5px] sm:text-[11px] uppercase tracking-wider transition-all cursor-pointer rounded-sm"
+            className="hidden sm:inline-flex items-center justify-center whitespace-nowrap px-3.5 sm:px-4 h-9 sm:h-9.5 md:h-10 border border-gold/50 text-gold hover:bg-gold/10 active:bg-gold/20 hover:border-gold active:scale-95 font-semibold text-[11px] sm:text-xs uppercase tracking-wider transition-all cursor-pointer rounded-sm"
           >
             Request A Quote
           </button>
@@ -330,10 +330,10 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                     window.location.hash = '#admin';
                     window.location.reload();
                   }}
-                  className="whitespace-nowrap px-3 sm:px-3.5 py-1.5 sm:py-1.5 md:py-2 bg-gradient-to-r from-gold-dark via-gold to-yellow-300 hover:brightness-110 active:scale-95 text-black-pure font-bold text-[10px] sm:text-[10.5px] md:text-[11px] uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)] cursor-pointer rounded-sm flex items-center justify-center gap-1.5 ml-1"
+                  className="whitespace-nowrap px-3.5 sm:px-4 h-9 sm:h-9.5 md:h-10 bg-gradient-to-r from-gold-dark via-gold to-yellow-300 hover:brightness-110 active:scale-95 text-black-pure font-bold text-[11px] sm:text-xs uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)] cursor-pointer rounded-sm inline-flex items-center justify-center gap-2 ml-1"
                   title="Open Admin Dashboard"
                 >
-                  <LayoutDashboard className="stroke-[2.2] w-3 h-3 md:w-3.5 md:h-3.5" />
+                  <LayoutDashboard className="stroke-[2.2] w-3.5 h-3.5" />
                   <span>Dashboard</span>
                 </button>
 
@@ -346,7 +346,7 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                     aria-label="Admin Profile"
                     title={displayName}
                   >
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 md:w-8.5 md:h-8.5 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-br from-gold/30 via-black-rich to-black-pure text-gold font-bold font-mono text-[10px] sm:text-xs select-none">
+                    <div className="w-8 h-8 sm:w-9 sm:h-9 md:w-9.5 md:h-9.5 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-br from-gold/30 via-black-rich to-black-pure text-gold font-bold font-mono text-[11px] sm:text-xs select-none">
                       {displayAvatar ? (
                         <img 
                           src={displayAvatar} 
@@ -608,7 +608,7 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                   if (onNavigateToAuth) onNavigateToAuth();
                   setMobileMenuOpen(false);
                 }}
-                className="whitespace-nowrap px-3 sm:px-3.5 py-1.5 sm:py-1.5 md:py-2 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold text-[10px] sm:text-[10.5px] md:text-[11px] uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)] hover:scale-105 active:scale-95 cursor-pointer rounded-sm flex items-center justify-center gap-1.5 ml-1"
+                className="whitespace-nowrap px-3.5 sm:px-4 h-9 sm:h-9.5 md:h-10 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold text-[11px] sm:text-xs uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)] hover:scale-105 active:scale-95 cursor-pointer rounded-sm inline-flex items-center justify-center gap-1.5 ml-1"
               >
                 <span>Join Natal</span>
                 <UserPlus className="stroke-[2.2] w-3 h-3 md:w-3.5 md:h-3.5" />
@@ -708,7 +708,7 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                 >
                   <button
                     onClick={() => handleLinkClick('#quote', 'quote')}
-                    className="w-full text-center px-4 py-2.5 border border-gold/40 text-gold text-[10px] sm:text-[11px] uppercase tracking-wider font-semibold hover:bg-gold/10 active:bg-gold/20 active:scale-98 hover:border-gold transition-all cursor-pointer rounded-sm"
+                    className="w-full text-center px-4 h-9 sm:h-10 inline-flex items-center justify-center border border-gold/40 text-gold text-xs uppercase tracking-wider font-semibold hover:bg-gold/10 active:bg-gold/20 active:scale-98 hover:border-gold transition-all cursor-pointer rounded-sm"
                   >
                     Request Quote
                   </button>
@@ -722,7 +722,7 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                           window.location.hash = '#admin';
                           window.location.reload();
                         }}
-                        className="w-full flex items-center justify-center gap-2 text-[10.5px] sm:text-[11px] uppercase tracking-wider bg-gradient-to-r from-gold-dark via-gold to-yellow-300 hover:brightness-110 active:scale-98 text-black-pure font-bold py-2.5 shadow-[0_0_15px_rgba(212,175,55,0.3)] transition-all rounded-sm cursor-pointer"
+                        className="w-full h-9 sm:h-10 inline-flex items-center justify-center gap-2 text-xs uppercase tracking-wider bg-gradient-to-r from-gold-dark via-gold to-yellow-300 hover:brightness-110 active:scale-98 text-black-pure font-bold shadow-[0_0_15px_rgba(212,175,55,0.3)] transition-all rounded-sm cursor-pointer"
                       >
                         <LayoutDashboard size={14} className="stroke-[2.2]" />
                         <span>Dashboard</span>
@@ -853,7 +853,7 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                         if (onNavigateToAuth) onNavigateToAuth();
                         setMobileMenuOpen(false);
                       }}
-                      className="w-full flex items-center justify-center gap-2.5 text-[10.5px] sm:text-[11px] uppercase tracking-wider bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold py-2.5 shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.4)] active:scale-98 transition-all rounded-sm cursor-pointer"
+                      className="w-full h-9 sm:h-10 flex items-center justify-center gap-2.5 text-xs uppercase tracking-wider bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.4)] active:scale-98 transition-all rounded-sm cursor-pointer"
                     >
                       <span>Join Natal</span>
                       <UserPlus size={14} className="stroke-[2.2]" />

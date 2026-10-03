@@ -27,7 +27,7 @@ export default function About() {
 
   return (
     <section id="about" className="py-6 sm:py-8 md:py-12 bg-black-pure relative overflow-hidden border-b border-white/10">
-      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-10">
+      <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-10">
         <div className="grid lg:grid-cols-12 gap-6 lg:gap-8 xl:gap-12 items-center">
           
           {/* Left: Concise Narrative */}
@@ -47,12 +47,12 @@ export default function About() {
               <span className="text-gradient-gold">{content.titleLine2}</span>
             </h2>
 
-            <p className="text-gray-300 text-xs sm:text-sm leading-relaxed mb-5 font-light max-w-xl">
+            <p className="text-gray-300 text-xs sm:text-sm md:text-[14px] leading-relaxed mb-5 font-light max-w-2xl">
               {content.narrative}
             </p>
             
             {/* Compact Pillars */}
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 w-full max-w-xl mb-5 sm:mb-6">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 w-full mb-5 sm:mb-6">
               {(content.pillars || defaultAboutContent.pillars).map((item, i) => {
                 const Icon = pillarIcons[i % pillarIcons.length];
                 return (
@@ -77,18 +77,18 @@ export default function About() {
             </div>
 
             {/* CTAs */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3.5 w-full sm:w-auto">
               <a
                 href="#quote"
-                className="inline-flex items-center justify-center gap-2 bg-gold hover:bg-gold-light text-black-pure font-bold px-5 sm:px-6 py-2.5 sm:py-3 text-[11px] sm:text-xs uppercase tracking-wider transition-all duration-300 shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.35)] whitespace-nowrap active:scale-95 rounded-sm"
+                className="h-11 sm:h-12 inline-flex items-center justify-center gap-2 bg-gold hover:bg-gold-light text-black-pure font-bold px-6 sm:px-7 text-xs sm:text-sm uppercase tracking-wider transition-all duration-300 shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.35)] whitespace-nowrap active:scale-95 rounded-sm"
               >
                 <span>Request Quotation</span>
-                <ArrowRight size={13} className="stroke-[2.2]" />
+                <ArrowRight size={14} className="stroke-[2.2]" />
               </a>
               <a
                 href="#products"
                 onClick={navigateToCreations}
-                className="inline-flex items-center justify-center px-5 sm:px-6 py-2.5 sm:py-3 border border-white/20 hover:border-gold/60 bg-black-rich/50 text-gray-200 hover:text-gold text-[11px] sm:text-xs uppercase tracking-wider transition-all whitespace-nowrap active:scale-95 text-center cursor-pointer rounded-sm"
+                className="h-11 sm:h-12 inline-flex items-center justify-center px-6 sm:px-7 border border-white/25 hover:border-gold/60 bg-black-rich/50 text-gray-200 hover:text-gold text-xs sm:text-sm uppercase tracking-wider transition-all whitespace-nowrap active:scale-95 text-center cursor-pointer rounded-sm"
               >
                 Explore Showcase
               </a>

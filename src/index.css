@@ -20,7 +20,7 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
-html, body {
+html, body, #root {
   background-color: var(--color-black-rich);
   color: #F3F4F6;
   font-family: var(--font-body);
@@ -28,6 +28,7 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
   width: 100%;
+  min-width: 100%;
   position: relative;
 }
 
@@ -104,7 +105,7 @@ a:active,
 }
 
 .animate-marquee {
-  animation: marquee 20s linear infinite;
+  animation: marquee 88s linear infinite;
 }
 
 .animate-marquee:hover {

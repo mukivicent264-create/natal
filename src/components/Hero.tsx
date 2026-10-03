@@ -30,7 +30,7 @@ export default function Hero() {
   };
 
   return (
-    <section id="home" className="relative min-h-[80vh] sm:min-h-[85vh] lg:min-h-[86vh] w-full overflow-hidden flex flex-col justify-between pt-20 sm:pt-22 md:pt-24 lg:pt-26 pb-4 sm:pb-6">
+    <section id="home" className="relative min-h-[85vh] sm:min-h-[88vh] lg:min-h-[90vh] w-full overflow-hidden flex flex-col justify-between pt-28 sm:pt-32 md:pt-36 lg:pt-40 pb-6 sm:pb-8">
       {/* Background Container - Stunning Luxury Interior & Optional Cinematic Video */}
       <div className="absolute inset-0 z-0 overflow-hidden">
         {/* Base Luxury Golden Interior Image - Always rendered, guaranteed visible */}
@@ -78,8 +78,8 @@ export default function Hero() {
       </div>
 
       {/* Main Content (Left-Aligned for Clear Background Video Playback) */}
-      <div className="relative z-20 w-full max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 my-auto pt-2 sm:pt-4 pb-4 sm:pb-6">
-        <div className="max-w-2xl lg:max-w-3xl xl:max-w-4xl flex flex-col items-start text-left">
+      <div className="relative z-20 w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 my-auto pt-2 sm:pt-4 pb-4 sm:pb-6">
+        <div className="w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl flex flex-col items-start text-left">
           {/* Main Brand Slogan */}
           <motion.div
             initial={{ opacity: 0, x: -25 }}
@@ -99,7 +99,7 @@ export default function Hero() {
             initial={{ opacity: 0, x: -25 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, delay: 0.35 }}
-            className="text-gray-200 text-xs sm:text-sm md:text-[14.5px] max-w-xl mb-4 sm:mb-5 font-light leading-relaxed text-left drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]"
+            className="text-gray-200 text-xs sm:text-sm md:text-[14.5px] max-w-2xl mb-4 sm:mb-5 font-light leading-relaxed text-left drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]"
           >
             {content.description}
           </motion.p>
@@ -109,20 +109,20 @@ export default function Hero() {
             initial={{ opacity: 0, x: -25 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, delay: 0.5 }}
-            className="flex flex-col sm:flex-row items-stretch sm:items-center justify-start gap-2.5 sm:gap-3.5 w-full sm:w-auto"
+            className="flex flex-col sm:flex-row items-stretch sm:items-center justify-start gap-3.5 sm:gap-4.5 w-full sm:w-auto"
           >
             <a
               href="#quote"
-              className="w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure transition-all duration-300 uppercase tracking-wider text-[11px] sm:text-xs font-bold text-center shadow-[0_0_15px_rgba(212,175,55,0.25)] hover:shadow-[0_0_25px_rgba(212,175,55,0.4)] whitespace-nowrap active:scale-95 rounded-sm"
+              className="w-full sm:w-auto px-7 sm:px-9 lg:px-10 h-13 sm:h-14 lg:h-[58px] bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure transition-all duration-300 uppercase tracking-wider sm:tracking-widest text-sm sm:text-[15px] font-bold text-center shadow-[0_0_25px_rgba(212,175,55,0.35)] hover:shadow-[0_0_35px_rgba(212,175,55,0.6)] whitespace-nowrap active:scale-95 rounded-sm inline-flex items-center justify-center gap-2.5 cursor-pointer"
             >
-              {content.primaryCtaText || 'Request Quotation'}
+              <span>{content.primaryCtaText || 'Request Quotation'}</span>
             </a>
             <a
               href="#products"
               onClick={navigateToCreations}
-              className="w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 border border-white/30 bg-black-pure/60 hover:bg-black-pure/90 backdrop-blur-md text-white hover:border-gold hover:text-gold transition-all duration-300 uppercase tracking-wider text-[11px] sm:text-xs font-medium text-center whitespace-nowrap active:scale-95 shadow-md cursor-pointer rounded-sm"
+              className="w-full sm:w-auto px-7 sm:px-9 lg:px-10 h-13 sm:h-14 lg:h-[58px] border-2 border-white/50 hover:border-gold bg-black-pure/75 hover:bg-black-pure/95 backdrop-blur-md text-white hover:text-gold transition-all duration-300 uppercase tracking-wider sm:tracking-widest text-sm sm:text-[15px] font-bold text-center whitespace-nowrap active:scale-95 shadow-md cursor-pointer rounded-sm inline-flex items-center justify-center gap-2.5"
             >
-              {content.secondaryCtaText || 'Explore Showcase'}
+              <span>{content.secondaryCtaText || 'Explore Showcase'}</span>
             </a>
           </motion.div>
         </div>
@@ -133,7 +133,7 @@ export default function Hero() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6, duration: 0.8 }}
-        className="relative z-20 w-full max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 mt-auto pb-4 sm:pb-6"
+        className="relative z-20 w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 mt-auto pb-4 sm:pb-6"
       >
         <div className="w-full">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 md:gap-7 lg:gap-8 w-full">

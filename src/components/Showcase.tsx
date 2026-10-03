@@ -81,7 +81,7 @@ export default function Showcase() {
 
   return (
     <section id="showcase" className="py-6 sm:py-8 md:py-12 bg-black-pure border-y border-gold/20 relative">
-      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
+      <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
         <div className="text-center mb-5 sm:mb-7">
           <motion.div
             initial={{ opacity: 0, y: 15 }}
@@ -163,10 +163,10 @@ export default function Showcase() {
         <div className="mt-6 sm:mt-8 text-center">
           <a
             href="#creations"
-            className="inline-flex items-center justify-center gap-2 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-5 sm:px-6 py-2.5 sm:py-3 font-bold uppercase tracking-wider text-[11px] sm:text-xs transition-all duration-300 shadow-[0_0_15px_rgba(212,175,55,0.25)] hover:shadow-[0_0_25px_rgba(212,175,55,0.4)] active:scale-95 rounded-sm cursor-pointer group whitespace-nowrap"
+            className="h-11 sm:h-12 inline-flex items-center justify-center gap-2 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-6 sm:px-8 font-bold uppercase tracking-wider sm:tracking-[0.15em] text-xs sm:text-sm transition-all duration-300 shadow-[0_0_20px_rgba(212,175,55,0.25)] hover:shadow-[0_0_30px_rgba(212,175,55,0.45)] active:scale-95 rounded-sm cursor-pointer group whitespace-nowrap"
           >
             <span>View All Interior Specialties</span>
-            <ArrowUpRight size={14} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0" />
+            <ArrowUpRight size={15} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0" />
           </a>
         </div>
       </div>

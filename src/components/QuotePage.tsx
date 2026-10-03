@@ -274,7 +274,7 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
         </div>
       </motion.div>
       
-      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
 
         {/* Contact Strip Banner Inspired directly by the bottom banner of the business card */}
         <div className="bg-black-pure border border-gold/40 rounded-none p-6 md:p-8 mb-16 shadow-2xl">

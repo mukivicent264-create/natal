@@ -40,7 +40,7 @@ export default function BeforeAfterSection() {
 
   return (
     <section className="py-6 sm:py-8 md:py-12 bg-black-rich border-b border-gold/15">
-      <div className="max-w-[94rem] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
+      <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
         <div className="text-center mb-4 sm:mb-6">
           <motion.h2 
             initial={{ opacity: 0, y: 20 }}
@@ -71,13 +71,13 @@ export default function BeforeAfterSection() {
           )}
         </div>
 
-        {/* Expansive luxury presentation card with generous width */}
+        {/* Expansive luxury presentation card with flexible width */}
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true }}
           transition={{ duration: 0.7 }}
-          className="max-w-5xl lg:max-w-6xl xl:max-w-7xl mx-auto p-3 sm:p-5 md:p-6 bg-black-pure/90 border border-gold/35 shadow-[0_15px_50px_rgba(0,0,0,0.85)] rounded-none mb-6 sm:mb-8"
+          className="w-full max-w-6xl xl:max-w-7xl 2xl:max-w-[1650px] mx-auto p-3 sm:p-5 md:p-6 bg-black-pure/90 border border-gold/35 shadow-[0_15px_50px_rgba(0,0,0,0.85)] rounded-none mb-6 sm:mb-8"
         >
           {/* Inner gilded frame with full image display */}
           <div className="border border-gold/25 overflow-hidden relative shadow-inner">
@@ -97,7 +97,7 @@ export default function BeforeAfterSection() {
         >
           <a
             href="#quote"
-            className="inline-flex items-center justify-center gap-2.5 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-5 sm:px-8 py-3 sm:py-3.5 font-bold uppercase tracking-wider sm:tracking-[0.2em] text-[10px] sm:text-xs transition-all duration-300 shadow-[0_0_20px_rgba(212,175,55,0.3)] hover:shadow-[0_0_30px_rgba(212,175,55,0.5)] active:scale-95 rounded-none cursor-pointer group whitespace-nowrap"
+            className="h-11 sm:h-12 inline-flex items-center justify-center gap-2.5 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-6 sm:px-8 font-bold uppercase tracking-wider sm:tracking-[0.15em] text-xs sm:text-sm transition-all duration-300 shadow-[0_0_20px_rgba(212,175,55,0.3)] hover:shadow-[0_0_30px_rgba(212,175,55,0.5)] active:scale-95 rounded-sm cursor-pointer group whitespace-nowrap"
           >
             <span>Start Your Transformation</span>
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:translate-x-1 transition-transform">

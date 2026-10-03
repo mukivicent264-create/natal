@@ -69,11 +69,11 @@ export default function Testimonials() {
         N
       </div>
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 relative z-10 text-center">
+      <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-10 text-center">
         <div className="mb-4 sm:mb-5">
-          <h2 className="text-gold tracking-[0.25em] uppercase text-xs sm:text-sm font-semibold mb-1">Client Feedback</h2>
-          <h3 className="font-heading text-2xl sm:text-3xl md:text-4xl text-white font-bold uppercase tracking-wider">Testimonials</h3>
-          <div className="w-20 h-[2px] bg-gradient-to-r from-transparent via-gold to-transparent mx-auto mt-2"></div>
+          <h2 className="text-gold tracking-[0.2em] uppercase text-[11px] sm:text-xs font-semibold mb-1">Client Feedback</h2>
+          <h3 className="font-heading text-xl sm:text-2xl md:text-3xl text-white font-bold uppercase tracking-wider">Testimonials</h3>
+          <div className="w-20 h-[1.5px] bg-gradient-to-r from-transparent via-gold to-transparent mx-auto mt-2"></div>
         </div>
         
         <div className="relative min-h-[160px] sm:min-h-[180px]">
@@ -88,7 +88,7 @@ export default function Testimonials() {
             >
               <Quote className="text-gold/20 w-8 h-8 sm:w-10 sm:h-10 mb-2 sm:mb-3" />
               
-              <p className="font-heading text-sm sm:text-lg md:text-xl text-white leading-snug sm:leading-relaxed mb-3 sm:mb-4 italic max-w-3xl">
+              <p className="font-heading text-sm sm:text-lg md:text-xl text-white leading-snug sm:leading-relaxed mb-3 sm:mb-4 italic max-w-4xl xl:max-w-5xl">
                 "{currentTestimonial.content}"
               </p>
               
