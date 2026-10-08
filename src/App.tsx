@@ -19,6 +19,7 @@ import AuthPage from './components/AuthPage';
 import QuotePage from './components/QuotePage';
 import AdminDashboard from './components/AdminDashboard';
 import ProjectSpecsPage from './components/ProjectSpecsPage';
+import GoldSpinner from './components/GoldSpinner';
 import { Project } from './types';
 import { projectsData } from './data';
 import { doc, getDoc } from 'firebase/firestore';
@@ -65,7 +66,7 @@ export default function App() {
         setIsCreationsPage(false);
         setIsServicesPage(false);
         setIsSpecsPage(false);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
         return;
       }
 
@@ -305,8 +306,14 @@ export default function App() {
     document.body.scrollTop = 0;
   };
 
-  const handleNavigateToAuth = () => {
-    window.location.hash = '#auth';
+  const handleNavigateToAuth = (mode: 'login' | 'register' = 'login') => {
+    setIsAuthPage(true);
+    setIsAdminDashboard(false);
+    setIsQuotePage(false);
+    setIsCreationsPage(false);
+    setIsServicesPage(false);
+    setIsSpecsPage(false);
+    window.location.hash = mode === 'register' ? '#register' : '#auth';
   };
 
   if (isAdminDashboard) {
@@ -325,12 +332,19 @@ export default function App() {
       )}
 
       <main className="w-full overflow-x-hidden">
-        {isSpecsPage && specsProject ? (
-          <ProjectSpecsPage 
-            project={specsProject} 
-            onNavigateHome={(sectionId) => handleNavigateHome(sectionId)}
-            onSelectOtherProject={handleOpenProjectSpecs}
-          />
+        {isSpecsPage ? (
+          specsProject ? (
+            <ProjectSpecsPage 
+              project={specsProject} 
+              onNavigateHome={(sectionId) => handleNavigateHome(sectionId)}
+              onSelectOtherProject={handleOpenProjectSpecs}
+            />
+          ) : (
+            <div className="min-h-screen bg-black-rich flex flex-col items-center justify-center p-6 text-center">
+              <GoldSpinner size="xl" label="Loading Architectural Specifications..." />
+              <p className="text-gray-400 font-mono text-xs mt-4">Retrieving project blueprints & technical data...</p>
+            </div>
+          )
         ) : isAuthPage ? (
           <AuthPage 
             onNavigateHome={(sectionId) => handleNavigateHome(sectionId)} 

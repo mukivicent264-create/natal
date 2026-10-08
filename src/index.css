@@ -112,6 +112,28 @@ a:active,
   animation-play-state: paused;
 }
 
+@keyframes heroScrollMobile {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-hero-scroll-mobile {
+  display: flex;
+  width: max-content;
+  animation: heroScrollMobile 22s linear infinite;
+  will-change: transform;
+}
+
+.animate-hero-scroll-mobile:hover,
+.animate-hero-scroll-mobile:active {
+  animation-play-state: paused;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
 .mask-image-edges {
   mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
   -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);

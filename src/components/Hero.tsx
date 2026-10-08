@@ -13,6 +13,15 @@ export default function Hero() {
   const videoSource = content.backgroundVideo || '';
   const posterSource = content.backgroundImage || defaultHeroContent.backgroundImage;
 
+  // Curated hero cards list with safety fallbacks
+  const cardsList = (content.cards && content.cards.length > 0 ? content.cards : defaultHeroContent.cards).map((item, idx) => {
+    const fallback = defaultHeroContent.cards[idx] || defaultHeroContent.cards[0];
+    return {
+      img: (item.img && item.img.trim()) ? item.img : fallback.img,
+      label: (item.label && item.label.trim()) ? item.label : fallback.label
+    };
+  });
+
   const navigateToCreations = (e: React.MouseEvent) => {
     e.preventDefault();
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
@@ -30,7 +39,7 @@ export default function Hero() {
   };
 
   return (
-    <section id="home" className="relative min-h-[85vh] sm:min-h-[88vh] lg:min-h-[90vh] w-full overflow-hidden flex flex-col justify-between pt-28 sm:pt-32 md:pt-36 lg:pt-40 pb-6 sm:pb-8">
+    <section id="home" className="relative min-h-[92vh] sm:min-h-[95vh] lg:min-h-screen w-full overflow-hidden flex flex-col justify-between pt-32 sm:pt-36 md:pt-40 lg:pt-44 pb-4 sm:pb-6">
       {/* Background Container - Stunning Luxury Interior & Optional Cinematic Video */}
       <div className="absolute inset-0 z-0 overflow-hidden">
         {/* Base Luxury Golden Interior Image - Always rendered, guaranteed visible */}
@@ -71,15 +80,15 @@ export default function Hero() {
           </video>
         )}
 
-        {/* Golden ambient lighting & soft directional scrims for crisp text readability without obscuring visuals */}
-        <div className="absolute inset-0 bg-gradient-to-r from-black-pure/75 via-black-pure/40 via-40% to-black-pure/15 z-10 pointer-events-none"></div>
-        <div className="absolute inset-0 bg-gradient-to-b from-black-pure/70 via-transparent via-50% to-black-pure/80 z-10 pointer-events-none"></div>
+        {/* Golden ambient lighting & soft directional scrims - lighter at top so background ceiling/image shines clearly */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black-pure/75 via-black-pure/35 via-45% to-black-pure/10 z-10 pointer-events-none"></div>
+        <div className="absolute inset-0 bg-gradient-to-b from-black-pure/40 via-transparent via-40% to-black-pure/85 z-10 pointer-events-none"></div>
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_45%,rgba(212,175,55,0.12)_0%,transparent_65%)] z-10 pointer-events-none"></div>
       </div>
 
-      {/* Main Content (Left-Aligned for Clear Background Video Playback) */}
-      <div className="relative z-20 w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 my-auto pt-2 sm:pt-4 pb-4 sm:pb-6">
-        <div className="w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl flex flex-col items-start text-left">
+      {/* Main Content (Extended lower down so the hero background image is visibly clear above) */}
+      <div className="relative z-20 w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 mt-auto mb-2 sm:mb-4 pt-20 sm:pt-28 md:pt-36 lg:pt-44 pb-3 sm:pb-5">
+        <div className="w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl flex flex-col items-start text-left pt-8 sm:pt-12 md:pt-16">
           {/* Main Brand Slogan */}
           <motion.div
             initial={{ opacity: 0, x: -25 }}
@@ -128,7 +137,7 @@ export default function Hero() {
         </div>
       </div>
 
-      {/* Curated Inspiration Gallery with Generous In-Between Spacing */}
+      {/* Curated Inspiration Gallery with Auto-Scroll on Mobile and Static Grid on Desktop */}
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -136,36 +145,62 @@ export default function Hero() {
         className="relative z-20 w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 mt-auto pb-4 sm:pb-6"
       >
         <div className="w-full">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 md:gap-7 lg:gap-8 w-full">
-            {(content.cards && content.cards.length > 0 ? content.cards : defaultHeroContent.cards).map((item, idx) => {
-              const fallback = defaultHeroContent.cards[idx] || defaultHeroContent.cards[0];
-              const imgSrc = (item.img && item.img.trim()) ? item.img : fallback.img;
-              const labelText = (item.label && item.label.trim()) ? item.label : fallback.label;
-              return (
+          {/* Desktop & Tablet: Static 4-Column Grid */}
+          <div className="hidden md:grid md:grid-cols-4 gap-5 lg:gap-7 xl:gap-8 w-full">
+            {cardsList.map((item, idx) => (
+              <a 
+                key={`hero-desk-${idx}`} 
+                href="#products"
+                onClick={navigateToCreations}
+                className="relative aspect-[16/10] sm:aspect-[16/9] w-full overflow-hidden border border-gold/40 hover:border-gold bg-black-pure/60 backdrop-blur-md group cursor-pointer shadow-[0_0_15px_rgba(212,175,55,0.15)] hover:shadow-[0_0_28px_rgba(212,175,55,0.45)] transition-all duration-300"
+              >
+                <img 
+                  src={item.img} 
+                  alt={item.label} 
+                  className="w-full h-full object-cover opacity-85 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black-pure via-black-pure/30 to-transparent opacity-85 group-hover:opacity-50 transition-opacity duration-300"></div>
+                
+                <div className="absolute bottom-2.5 left-3 right-3 sm:bottom-3 sm:left-4 sm:right-4 flex items-center justify-between">
+                  <span className="text-[11px] sm:text-xs text-white/95 group-hover:text-gold uppercase tracking-wider font-mono font-medium transition-colors">
+                    {item.label}
+                  </span>
+                </div>
+                
+                {/* Glowing bottom accent line */}
+                <div className="absolute bottom-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-gold to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-[0_0_12px_rgba(212,175,55,0.8)]"></div>
+              </a>
+            ))}
+          </div>
+
+          {/* Mobile Screen Only: Auto-scroll from Right to Left in Single Row Format */}
+          <div className="md:hidden w-full overflow-hidden relative py-1 mask-image-edges">
+            <div className="animate-hero-scroll-mobile flex gap-3.5 w-max">
+              {[...cardsList, ...cardsList, ...cardsList].map((item, idx) => (
                 <a 
-                  key={idx} 
+                  key={`hero-mob-${idx}`} 
                   href="#products"
                   onClick={navigateToCreations}
-                  className="relative aspect-[16/10] sm:aspect-[16/9] w-full overflow-hidden border border-gold/40 hover:border-gold bg-black-pure/60 backdrop-blur-md group cursor-pointer shadow-[0_0_15px_rgba(212,175,55,0.15)] hover:shadow-[0_0_28px_rgba(212,175,55,0.45)] transition-all duration-300"
+                  className="relative w-[210px] sm:w-[250px] aspect-[16/10] shrink-0 overflow-hidden border border-gold/40 hover:border-gold bg-black-pure/75 backdrop-blur-md group cursor-pointer shadow-[0_0_14px_rgba(212,175,55,0.2)] active:scale-98 transition-all block"
                 >
                   <img 
-                    src={imgSrc} 
-                    alt={labelText} 
+                    src={item.img} 
+                    alt={item.label} 
                     className="w-full h-full object-cover opacity-85 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black-pure via-black-pure/30 to-transparent opacity-85 group-hover:opacity-50 transition-opacity duration-300"></div>
                   
-                  <div className="absolute bottom-2.5 left-3 right-3 sm:bottom-3 sm:left-4 sm:right-4 flex items-center justify-between">
-                    <span className="text-[11px] sm:text-xs text-white/95 group-hover:text-gold uppercase tracking-wider font-mono font-medium transition-colors">
-                      {labelText}
+                  <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between">
+                    <span className="text-[10px] text-white/95 group-hover:text-gold uppercase tracking-wider font-mono font-medium truncate">
+                      {item.label}
                     </span>
                   </div>
                   
                   {/* Glowing bottom accent line */}
-                  <div className="absolute bottom-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-gold to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-[0_0_12px_rgba(212,175,55,0.8)]"></div>
+                  <div className="absolute bottom-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-gold to-transparent opacity-75 group-hover:opacity-100 transition-opacity duration-300 shadow-[0_0_12px_rgba(212,175,55,0.8)]"></div>
                 </a>
-              );
-            })}
+              ))}
+            </div>
           </div>
         </div>
       </motion.div>

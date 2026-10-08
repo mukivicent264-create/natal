@@ -28,6 +28,213 @@ export function sanitizeForFirestore<T = any>(obj: T): T {
   return clean as T;
 }
 
+/**
+ * Strict Form Constraints & Validators
+ * Enforces letters-only for names (no numbers, symbols, or digits),
+ * clean phone formatting (digits & valid symbols), and RFC email checking.
+ */
+
+// Regex allowing only alphabetical letters (including Latin accents) and natural name separators (space, hyphen, apostrophe)
+export const NAME_ALLOWED_CHARS_REGEX = /[^a-zA-Z\u00C0-\u024F\u1E00-\u1EFF\s'-]/g;
+
+// Detects if string contains numbers or disallowed symbols
+export const CONTAINS_DIGITS_OR_SYMBOLS_REGEX = /[\d`~!@#$%^&*()_+={}\[\]|\\:;"<>?,./]/;
+
+/**
+ * Strips any numbers, symbols, or digits from input in real time.
+ * Leaves only alphabetical letters, single spaces, apostrophes, and hyphens.
+ */
+export function sanitizeNameInput(val: string): string {
+  if (!val) return '';
+  // Remove numbers, math symbols, punctuation except single hyphens and apostrophes
+  const cleaned = val.replace(NAME_ALLOWED_CHARS_REGEX, '');
+  // Disallow leading spaces or multiple consecutive spaces
+  return cleaned.replace(/^\s+/, '').replace(/\s{2,}/g, ' ');
+}
+
+/**
+ * Validates that a name consists purely of letters (at least 2 letters),
+ * without any numbers, digits, or prohibited symbols.
+ */
+export function isValidName(name: string): boolean {
+  if (!name) return false;
+  const trimmed = name.trim();
+  if (trimmed.length < 2) return false;
+  // Must contain only letters, spaces, hyphens, and apostrophes
+  // and must start and end with a letter
+  const strictLetterRegex = /^[a-zA-Z\u00C0-\u024F\u1E00-\u1EFF]+(?:[ '-][a-zA-Z\u00C0-\u024F\u1E00-\u1EFF]+)*$/;
+  return strictLetterRegex.test(trimmed);
+}
+
+/**
+ * Sanitizes phone input to keep only digits, plus (+), spaces, hyphens, and parentheses.
+ * Strictly limits the phone / WhatsApp number to a maximum of 10 digits.
+ */
+export function sanitizePhoneInput(val: string): string {
+  if (!val) return '';
+  const clean = val.replace(/[^\d+()\s-]/g, '');
+  let digitCount = 0;
+  let result = '';
+  for (const ch of clean) {
+    if (/\d/.test(ch)) {
+      if (digitCount < 10) {
+        digitCount++;
+        result += ch;
+      }
+    } else {
+      result += ch;
+    }
+  }
+  return result;
+}
+
+/**
+ * Validates phone number format (limited to 10 digits).
+ */
+export function isValidPhone(phone: string): boolean {
+  if (!phone) return false;
+  const digitsOnly = phone.replace(/\D/g, '');
+  return digitsOnly.length === 10 || (digitsOnly.length >= 7 && digitsOnly.length <= 10);
+}
+
+/**
+ * Validates email address format.
+ */
+export function isValidEmail(email: string): boolean {
+  if (!email) return false;
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  return emailRegex.test(email.trim());
+}
+
+/**
+ * Intercepts keyboard events for name fields to block numbers, digits, and disallowed symbols
+ * before they can be typed, giving instantaneous constraint feedback.
+ */
+export function handleNameKeyDown(
+  e: React.KeyboardEvent<HTMLInputElement>,
+  onError?: (msg: string) => void
+) {
+  // Allow navigation, deletion, clipboard shortcuts and function keys
+  if (
+    e.ctrlKey || 
+    e.metaKey || 
+    e.altKey ||
+    ['Backspace', 'Delete', 'Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)
+  ) {
+    return;
+  }
+
+  // Only check printable single-character keystrokes
+  if (e.key.length === 1) {
+    // Check if key is a digit/number
+    if (/[0-9]/.test(e.key)) {
+      e.preventDefault();
+      onError?.('Numbers and digits are not allowed. Please enter letters only.');
+      return;
+    }
+
+    // Check if key is a disallowed symbol
+    if (/[^a-zA-Z\u00C0-\u024F\u1E00-\u1EFF\s'-]/.test(e.key)) {
+      e.preventDefault();
+      onError?.('Symbols are not allowed in name fields. Please enter letters only.');
+      return;
+    }
+
+    // Disallow leading space or consecutive spaces
+    const target = e.currentTarget;
+    const selStart = target.selectionStart ?? 0;
+    if (e.key === ' ' && (selStart === 0 || target.value.slice(Math.max(0, selStart - 1), selStart) === ' ')) {
+      e.preventDefault();
+      return;
+    }
+  }
+}
+
+/**
+ * Intercepts clipboard paste on name fields to strip numbers and symbols
+ */
+export function handleNamePaste(
+  e: React.ClipboardEvent<HTMLInputElement>,
+  setValue: (clean: string) => void,
+  onError?: (msg: string) => void
+) {
+  const pasteText = e.clipboardData.getData('text');
+  if (CONTAINS_DIGITS_OR_SYMBOLS_REGEX.test(pasteText)) {
+    e.preventDefault();
+    const clean = sanitizeNameInput(pasteText);
+    const target = e.currentTarget;
+    const start = target.selectionStart ?? 0;
+    const end = target.selectionEnd ?? 0;
+    const currentVal = target.value;
+    const newVal = sanitizeNameInput(currentVal.substring(0, start) + clean + currentVal.substring(end));
+    setValue(newVal);
+  }
+}
+
+/**
+ * Intercepts keyboard events for phone fields to block letters and disallowed characters
+ * before they can be typed.
+ */
+export function handlePhoneKeyDown(
+  e: React.KeyboardEvent<HTMLInputElement>,
+  onError?: (msg: string) => void
+) {
+  if (
+    e.ctrlKey || 
+    e.metaKey || 
+    e.altKey ||
+    ['Backspace', 'Delete', 'Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)
+  ) {
+    return;
+  }
+
+  if (e.key.length === 1) {
+    if (/[a-zA-Z]/.test(e.key)) {
+      e.preventDefault();
+      onError?.('Letters are not allowed in phone fields.');
+      return;
+    }
+    if (/[^\d+()\s-]/.test(e.key)) {
+      e.preventDefault();
+      onError?.('Invalid character. Only digits, +, spaces, and dashes are allowed.');
+      return;
+    }
+    // Limit total digits to 10
+    if (/\d/.test(e.key)) {
+      const target = e.currentTarget;
+      const selStart = target.selectionStart ?? 0;
+      const selEnd = target.selectionEnd ?? 0;
+      const selectedDigits = target.value.slice(selStart, selEnd).replace(/\D/g, '').length;
+      const currentDigits = target.value.replace(/\D/g, '').length;
+      if (currentDigits - selectedDigits >= 10) {
+        e.preventDefault();
+        return;
+      }
+    }
+  }
+}
+
+/**
+ * Intercepts clipboard paste on phone fields to strip letters and disallowed characters
+ */
+export function handlePhonePaste(
+  e: React.ClipboardEvent<HTMLInputElement>,
+  setValue: (clean: string) => void,
+  onError?: (msg: string) => void
+) {
+  const pasteText = e.clipboardData.getData('text');
+  if (/[a-zA-Z]/.test(pasteText) || /[^\d+()\s-]/.test(pasteText)) {
+    e.preventDefault();
+    const clean = sanitizePhoneInput(pasteText);
+    const target = e.currentTarget;
+    const start = target.selectionStart ?? 0;
+    const end = target.selectionEnd ?? 0;
+    const currentVal = target.value;
+    const newVal = sanitizePhoneInput(currentVal.substring(0, start) + clean + currentVal.substring(end));
+    setValue(newVal);
+  }
+}
+
 export type ActivityType = 
   | 'registration' 
   | 'quotation' 
@@ -1063,21 +1270,40 @@ export async function compressImageFile(
         ctx.drawImage(img, 0, 0, width, height);
 
         try {
-          // If the original file is a PNG, export as PNG to preserve transparent alpha channel!
-          // Converting PNG to JPEG was turning transparent logos into solid black blocks.
           const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
           const isWebp = file.type === 'image/webp' || file.name.toLowerCase().endsWith('.webp');
-          
-          if (isPng) {
-            const compressed = canvas.toDataURL('image/png');
-            resolve(compressed);
-          } else if (isWebp) {
+
+          if (isWebp) {
             const compressed = canvas.toDataURL('image/webp', quality);
             resolve(compressed);
-          } else {
-            const compressed = canvas.toDataURL('image/jpeg', quality);
-            resolve(compressed);
+            return;
           }
+
+          if (isPng) {
+            // Try webp first to preserve alpha transparency while achieving high compression
+            try {
+              const webpData = canvas.toDataURL('image/webp', quality);
+              if (webpData.startsWith('data:image/webp') && webpData.length < 200 * 1024) {
+                resolve(webpData);
+                return;
+              }
+            } catch {}
+
+            const pngData = canvas.toDataURL('image/png');
+            // If PNG is under 150KB, safe to keep as PNG
+            if (pngData.length <= 150 * 1024) {
+              resolve(pngData);
+              return;
+            }
+
+            // High-resolution photo PNG: convert to JPEG with quality to prevent Firestore 1MB quota errors
+            const jpgData = canvas.toDataURL('image/jpeg', quality);
+            resolve(jpgData);
+            return;
+          }
+
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressed);
         } catch {
           resolve(reader.result as string);
         }
@@ -1085,6 +1311,69 @@ export async function compressImageFile(
       img.src = reader.result as string;
     };
     reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Takes any Base64 data URL and ensures it is compressed to fit safely
+ * within Firestore document storage limits (1,048,576 bytes).
+ */
+export async function optimizeBase64Image(
+  dataUrl: string,
+  maxWidth = 800,
+  maxHeight = 600,
+  quality = 0.75
+): Promise<string> {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    return dataUrl;
+  }
+
+  // If already under 75KB, it is well within safe bounds
+  if (dataUrl.length < 75 * 1024) return dataUrl;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxWidth || height > maxHeight) {
+        const ratio = Math.min(maxWidth / width, maxHeight / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Try webp first (preserves alpha + lossy compression)
+      try {
+        const webp = canvas.toDataURL('image/webp', quality);
+        if (webp.startsWith('data:image/webp') && webp.length < dataUrl.length) {
+          resolve(webp);
+          return;
+        }
+      } catch {}
+
+      // Fallback to jpeg
+      try {
+        const jpeg = canvas.toDataURL('image/jpeg', quality);
+        resolve(jpeg.length < dataUrl.length ? jpeg : dataUrl);
+      } catch {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
   });
 }
 
@@ -1624,6 +1913,253 @@ export async function seedInitialDatabaseIfEmpty(force = false): Promise<{
     transformationsCount: trCount,
     mediaCount: mCount
   };
+}
+
+export interface OwnerEmailTriggerParams {
+  leadType: 'Quotation Request' | 'Contact Form' | 'VIP Registration';
+  name: string;
+  email: string;
+  phone?: string;
+  service?: string;
+  details?: string;
+  fileAttachmentName?: string;
+}
+
+/**
+ * Creates an email dispatch record in the Firestore 'mail' collection,
+ * which the Firebase Trigger Email Extension (firestore-send-email) automatically detects
+ * and delivers directly to the owner's personal inbox (mukisavicent7777@gmail.com).
+ */
+export async function triggerOwnerEmailNotification(params: OwnerEmailTriggerParams) {
+  try {
+    const adminProfile = getAdminProfile();
+    const primaryRecipient = adminProfile?.email || 'mukisavicent7777@gmail.com';
+    const fallbackRecipient = 'usherhenry99@gmail.com';
+
+    // De-duplicate recipient emails
+    const recipients = Array.from(new Set([
+      primaryRecipient.trim().toLowerCase(),
+      fallbackRecipient.trim().toLowerCase(),
+      'mukisavicent7777@gmail.com'
+    ])).filter(Boolean);
+
+    const cleanPhone = (params.phone || '').trim();
+    const whatsappDigits = cleanPhone.replace(/\D/g, '').replace(/^0/, '');
+    const whatsappLink = whatsappDigits.length >= 7 
+      ? `https://wa.me/256${whatsappDigits}`
+      : null;
+
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; background-color: #0d0d0d; color: #f3f4f6; padding: 24px; border: 1px solid #D4AF37; max-width: 600px; margin: 0 auto; border-radius: 4px;">
+        <div style="border-bottom: 2px solid #D4AF37; padding-bottom: 12px; margin-bottom: 16px;">
+          <h2 style="color: #D4AF37; margin: 0; text-transform: uppercase; font-size: 18px; letter-spacing: 2px;">
+            Natal Interior Design &amp; Construction
+          </h2>
+          <p style="color: #9ca3af; margin: 4px 0 0 0; font-size: 12px; font-family: monospace;">
+            NEW CLIENT SUBMISSION NOTIFICATION
+          </p>
+        </div>
+
+        <div style="background-color: #1a1a1a; padding: 16px; border-left: 4px solid #D4AF37; margin-bottom: 20px;">
+          <span style="display: inline-block; background-color: #D4AF37; color: #000; font-weight: bold; font-size: 11px; padding: 3px 8px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">
+            ${params.leadType}
+          </span>
+          <h3 style="color: #ffffff; margin: 6px 0 0 0; font-size: 16px;">
+            ${params.name || 'Valued Client'}
+          </h3>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px;">
+          <tr style="border-bottom: 1px solid #2d2d2d;">
+            <td style="padding: 10px 0; color: #D4AF37; width: 35%; font-weight: bold;">Client Name:</td>
+            <td style="padding: 10px 0; color: #ffffff;">${params.name}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #2d2d2d;">
+            <td style="padding: 10px 0; color: #D4AF37; font-weight: bold;">Email Address:</td>
+            <td style="padding: 10px 0; color: #ffffff;"><a href="mailto:${params.email}" style="color: #D4AF37; text-decoration: underline;">${params.email}</a></td>
+          </tr>
+          ${params.phone ? `
+          <tr style="border-bottom: 1px solid #2d2d2d;">
+            <td style="padding: 10px 0; color: #D4AF37; font-weight: bold;">Phone Number:</td>
+            <td style="padding: 10px 0; color: #ffffff;"><a href="tel:${params.phone}" style="color: #ffffff; text-decoration: none;">${params.phone}</a></td>
+          </tr>
+          ` : ''}
+          ${params.service ? `
+          <tr style="border-bottom: 1px solid #2d2d2d;">
+            <td style="padding: 10px 0; color: #D4AF37; font-weight: bold;">Service Requested:</td>
+            <td style="padding: 10px 0; color: #ffffff; font-weight: bold;">${params.service}</td>
+          </tr>
+          ` : ''}
+          ${params.fileAttachmentName ? `
+          <tr style="border-bottom: 1px solid #2d2d2d;">
+            <td style="padding: 10px 0; color: #D4AF37; font-weight: bold;">Attached File / Plan:</td>
+            <td style="padding: 10px 0; color: #ffffff;">${params.fileAttachmentName}</td>
+          </tr>
+          ` : ''}
+        </table>
+
+        ${params.details ? `
+        <div style="background-color: #141414; padding: 14px; border: 1px solid #333333; margin-bottom: 20px;">
+          <strong style="color: #D4AF37; display: block; font-size: 12px; text-transform: uppercase; margin-bottom: 6px;">Message / Project Scope:</strong>
+          <p style="margin: 0; color: #d1d5db; font-size: 13px; line-height: 1.6; white-space: pre-line;">${params.details}</p>
+        </div>
+        ` : ''}
+
+        <div style="padding-top: 10px; text-align: center;">
+          ${whatsappLink ? `
+            <a href="${whatsappLink}" style="display: inline-block; background-color: #25D366; color: #ffffff; font-weight: bold; font-size: 13px; padding: 10px 18px; text-decoration: none; border-radius: 3px; margin-right: 8px;">
+              💬 Reply via WhatsApp
+            </a>
+          ` : ''}
+          <a href="mailto:${params.email}?subject=RE: Natal Interior Design Inquiry" style="display: inline-block; background-color: #D4AF37; color: #000000; font-weight: bold; font-size: 13px; padding: 10px 18px; text-decoration: none; border-radius: 3px;">
+            ✉️ Reply via Email
+          </a>
+        </div>
+
+        <p style="color: #6b7280; font-size: 11px; text-align: center; margin-top: 24px; font-family: monospace;">
+          Sent by Natal Interior Design &amp; Construction • Firestore Trigger Email Extension
+        </p>
+      </div>
+    `;
+
+    const plainText = `
+[NATAL INTERIOR DESIGN & CONSTRUCTION - NEW LEAD]
+Type: ${params.leadType}
+Client: ${params.name}
+Email: ${params.email}
+Phone: ${params.phone || 'N/A'}
+Service: ${params.service || 'N/A'}
+Details: ${params.details || 'N/A'}
+${params.fileAttachmentName ? `Attachment: ${params.fileAttachmentName}` : ''}
+    `.trim();
+
+    const mailDoc = {
+      to: recipients,
+      replyTo: params.email || undefined,
+      message: {
+        subject: `🚨 [Natal Lead] ${params.leadType}: ${params.name} - ${params.service || 'General Inquiry'}`,
+        text: plainText,
+        html: htmlContent
+      },
+      leadType: params.leadType,
+      clientName: params.name,
+      clientEmail: params.email,
+      clientPhone: params.phone || '',
+      createdAt: serverTimestamp()
+    };
+
+    // Dynamic Email Service Delivery
+    const emailSettings = getEmailServiceSettings();
+    const targetEmail = (emailSettings.recipientEmail || primaryRecipient).trim().toLowerCase();
+
+    let serviceResult: { success: boolean; message?: string; activated?: boolean } = { success: true };
+
+    // 1. Direct Delivery to Configured Inbox via FormSubmit AJAX API
+    if (emailSettings.serviceEnabled && targetEmail) {
+      try {
+        const autoReplyMessage = params.email 
+          ? `Dear ${params.name || 'Valued Client'},\n\nThank you for reaching out to Natal Interior Design & Construction regarding your ${params.leadType.toLowerCase()} for "${params.service || 'Interior Design & Construction'}".\n\nWe have safely received your project scope and specifications. Our lead project engineer is reviewing your details and will follow up with you directly via WhatsApp or phone call shortly.\n\nWarm regards,\nNatal Interior Design & Construction\nKampala, Uganda`
+          : undefined;
+
+        const response = await fetch(`https://formsubmit.co/ajax/${targetEmail}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            _subject: `🚨 [Natal Lead] ${params.leadType}: ${params.name} - ${params.service || 'General Inquiry'}`,
+            _template: 'box',
+            _captcha: 'false',
+            _replyto: params.email || undefined,
+            _autoresponse: autoReplyMessage,
+            'Lead Type': params.leadType,
+            'Client Name': params.name,
+            'Client Email': params.email || 'N/A',
+            'Client Phone / WhatsApp': params.phone || 'N/A',
+            'Service Requested': params.service || 'N/A',
+            'Project Scope / Details': params.details || 'N/A',
+            'Plan / File Attachment': params.fileAttachmentName || 'None',
+            'WhatsApp Direct Link': whatsappLink || 'N/A',
+            'Submission Timestamp': new Date().toLocaleString()
+          })
+        });
+
+        const resData = await response.json().catch(() => null);
+        if (resData) {
+          const rawMsg = typeof resData.message === 'string' ? resData.message : '';
+          const isActivationPrompt = 
+            rawMsg.toLowerCase().includes('activate') || 
+            rawMsg.toLowerCase().includes('confirm') || 
+            resData.success === 'false' || 
+            resData.success === false;
+
+          serviceResult = {
+            success: resData.success === 'true' || resData.success === true,
+            message: rawMsg || (isActivationPrompt ? 'Activation email dispatched to inbox' : 'Delivered'),
+            activated: !isActivationPrompt
+          };
+        }
+      } catch (e: any) {
+        console.warn('Direct mail dispatch note:', e);
+        serviceResult = { success: false, message: e?.message || 'Network dispatch notice' };
+      }
+    }
+
+    // 2. Queue into Firestore 'mail' collection as audit record & for Admin Dashboard
+    let mailDocId = 'mail_' + Date.now();
+    try {
+      const docRef = await addDoc(collection(db, 'mail'), sanitizeForFirestore({
+        ...mailDoc,
+        deliveredTo: targetEmail,
+        serviceProvider: emailSettings.provider || 'formsubmit',
+        dispatchResult: serviceResult
+      }));
+      mailDocId = docRef.id;
+    } catch (fbErr) {
+      console.warn("Firestore mail queue audit note:", fbErr);
+    }
+
+    return { 
+      success: true, 
+      mailId: mailDocId, 
+      recipient: targetEmail,
+      providerResult: serviceResult 
+    };
+  } catch (err: any) {
+    console.warn("Could not queue notification into Firestore mail collection:", err);
+    return { success: false, error: err };
+  }
+}
+
+export interface EmailServiceSettings {
+  serviceEnabled: boolean;
+  recipientEmail: string;
+  provider: 'formsubmit' | 'web3forms' | 'firestore_mail';
+  web3FormsKey?: string;
+  lastTestedAt?: string;
+}
+
+export function getEmailServiceSettings(): EmailServiceSettings {
+  try {
+    const raw = localStorage.getItem('natal_email_service_settings');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.recipientEmail) return parsed;
+    }
+  } catch {}
+  return {
+    serviceEnabled: true,
+    recipientEmail: 'mukisavicent7777@gmail.com',
+    provider: 'formsubmit'
+  };
+}
+
+export function saveEmailServiceSettings(settings: EmailServiceSettings) {
+  try {
+    localStorage.setItem('natal_email_service_settings', JSON.stringify(settings));
+    window.dispatchEvent(new CustomEvent('natal_email_service_changed', { detail: settings }));
+  } catch {}
 }
 
 

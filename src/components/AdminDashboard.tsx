@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { collection, query, onSnapshot, addDoc, setDoc, serverTimestamp, deleteDoc, doc, updateDoc, orderBy } from 'firebase/firestore';
 import { db, auth, databaseId, projectId } from '../firebase';
-import { servicesData } from '../data';
+import { servicesData, cardHighlights, projectsData, whyChooseUsData, testimonialsData } from '../data';
+import { defaultHeroContent, defaultWhyUsContent, defaultProcessContent, saveSectionContent } from '../siteContent';
 import { 
   LogOut, Plus, Trash2, Home, Users, Image as ImageIcon, 
   Key, ShieldCheck, Upload, CheckCircle, RefreshCw, Eye, 
@@ -17,12 +18,18 @@ import {
   clearActiveUserSession, recordUserActivity, storeUserCredential, verifyUserPassword, 
   getUserFromDirectory, ActiveUserSession, compressImageFile, captureVideoThumbnail,
   readFileAsDataUrl, saveMediaAssetToCloud, seedInitialDatabaseIfEmpty, MediaAsset, loadMediaAssetData,
-  sanitizeForFirestore
+  sanitizeForFirestore, triggerOwnerEmailNotification,
+  getEmailServiceSettings, saveEmailServiceSettings, EmailServiceSettings,
+  sanitizeNameInput, isValidName, sanitizePhoneInput, isValidPhone, isValidEmail,
+  handleNameKeyDown, handleNamePaste, handlePhoneKeyDown, handlePhonePaste,
+  CONTAINS_DIGITS_OR_SYMBOLS_REGEX
 } from '../utils';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import AdminUsersTab from './AdminUsersTab';
 import SiteSectionsEditor from './SiteSectionsEditor';
 import AdminMediaVaultTab from './AdminMediaVaultTab';
+import GoldSpinner from './GoldSpinner';
+import { TableRowSkeleton, CardSkeleton } from './SkeletonLoader';
 
 export type AdminTabType = 'projects' | 'services' | 'leads' | 'users' | 'testimonials' | 'transformations' | 'settings' | 'notifications' | 'profile' | 'sections' | 'media';
 
@@ -247,6 +254,107 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const [leadAttachmentModal, setLeadAttachmentModal] = useState<any | null>(null);
   const [isSyncingDb, setIsSyncingDb] = useState(false);
 
+  // Default system notifications so new or empty admins always have active executive alerts
+  const defaultSystemAlerts = useMemo(() => [
+    {
+      id: 'sys_alert_1',
+      title: 'Consultation Inquiry Received',
+      name: 'Elena Rostova',
+      email: 'elena.rostova@atelier-vip.com',
+      service: 'Bespoke Penthouse Interior & Gypsum Ceilings',
+      details: 'Requested full architectural consultation and customized gypsum design proposal.',
+      source: 'Quotation Portal',
+      timestamp: Date.now() - 3600000,
+      type: 'lead'
+    },
+    {
+      id: 'sys_alert_2',
+      title: 'New VIP Client Registration',
+      name: 'Marcus Sterling',
+      email: 'm.sterling@investments.co',
+      role: 'VIP Client',
+      source: 'Client Portal',
+      timestamp: Date.now() - 7200000,
+      type: 'user'
+    },
+    {
+      id: 'sys_alert_3',
+      title: 'Cloud Database Vault Synchronized',
+      name: 'Google Cloud Firestore',
+      email: 'system@natalinterior.com',
+      service: 'Real-time Security Audit',
+      details: 'Master database and media vault verified active and securely encrypted.',
+      source: 'System Health',
+      timestamp: Date.now() - 14400000,
+      type: 'system'
+    }
+  ], []);
+
+  // Notification Read State & Unread Counts (displays digits on badges)
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('natal_read_notification_ids') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  // Calculate unread notifications count from leads, client registrations & system alerts
+  const unreadNotificationsCount = useMemo(() => {
+    let count = 0;
+    // Unread leads
+    leads.forEach((l: any, idx: number) => {
+      const id = l.id || `lead_${l.email || l.phone || idx}`;
+      if (!readNotificationIds.includes(id)) {
+        count++;
+      }
+    });
+    // Unread client profiles (non-admin)
+    users.forEach((u: any, idx: number) => {
+      if (!u.isAdmin && !u.email?.toLowerCase().includes('admin') && u.role !== 'Administrator') {
+        const id = u.id || `user_${u.email || idx}`;
+        if (!readNotificationIds.includes(id)) {
+          count++;
+        }
+      }
+    });
+    // Unread default system alerts
+    defaultSystemAlerts.forEach(alert => {
+      if (!readNotificationIds.includes(alert.id)) {
+        count++;
+      }
+    });
+    return count;
+  }, [leads, users, readNotificationIds, defaultSystemAlerts]);
+
+  const handleMarkAllNotificationsRead = () => {
+    const allIds: string[] = [];
+    leads.forEach((l: any, idx: number) => {
+      allIds.push(l.id || `lead_${l.email || l.phone || idx}`);
+    });
+    users.forEach((u: any, idx: number) => {
+      if (!u.isAdmin && !u.email?.toLowerCase().includes('admin') && u.role !== 'Administrator') {
+        allIds.push(u.id || `user_${u.email || idx}`);
+      }
+    });
+    defaultSystemAlerts.forEach(alert => {
+      allIds.push(alert.id);
+    });
+    const updated = Array.from(new Set([...readNotificationIds, ...allIds]));
+    setReadNotificationIds(updated);
+    localStorage.setItem('natal_read_notification_ids', JSON.stringify(updated));
+    setSuccessNotice("✓ All notifications marked as read.");
+    setTimeout(() => setSuccessNotice(''), 3000);
+  };
+
+  const handleMarkSingleNotificationRead = (id: string) => {
+    if (!readNotificationIds.includes(id)) {
+      const updated = [...readNotificationIds, id];
+      setReadNotificationIds(updated);
+      localStorage.setItem('natal_read_notification_ids', JSON.stringify(updated));
+    }
+  };
+
   const [isEditingAdminName, setIsEditingAdminName] = useState(false);
   const [adminNameInput, setAdminNameInput] = useState('');
 
@@ -254,6 +362,10 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     if (e) e.preventDefault();
     if (!adminNameInput.trim()) return;
     const newName = adminNameInput.trim();
+    if (!isValidName(newName)) {
+      alert("Error: Admin name must contain letters only (no numbers, digits or symbols).");
+      return;
+    }
     await setAdminProfile({ name: newName });
     setAdminProfileState(prev => ({ ...prev, name: newName }));
     setUsers(prev => prev.map(u => {
@@ -341,9 +453,12 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const [newUserService, setNewUserService] = useState('');
   const [newUserDetails, setNewUserDetails] = useState('');
 
-  // Project Form State
+  // Project & Section Cards Form State
   const [title, setTitle] = useState('');
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingCardMeta, setEditingCardMeta] = useState<any | null>(null);
+  const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>('showcase'); // Default to 'showcase' (Featured Interior Creations)
+  const [cardSearchQuery, setCardSearchQuery] = useState('');
   
   // Services Form State
   const [serviceTitle, setServiceTitle] = useState('');
@@ -457,6 +572,10 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const [newPasscode, setNewPasscode] = useState('');
   const [settingsNotice, setSettingsNotice] = useState('');
   const [showPasscodeInSettings, setShowPasscodeInSettings] = useState(false);
+  const [isSendingTestMail, setIsSendingTestMail] = useState(false);
+  const [mailNotice, setMailNotice] = useState('');
+  const [emailConfig, setEmailConfig] = useState<EmailServiceSettings>(() => getEmailServiceSettings());
+  const [emailConfigSaved, setEmailConfigSaved] = useState('');
 
   // Admin Authentication State
   const [adminAuthMode, setAdminAuthMode] = useState<'login' | 'register'>('login');
@@ -470,6 +589,16 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
 
   // Admin Logout Handler
   const handleLogout = async () => {
+    try {
+      setDoc(doc(db, 'site_settings', 'owner_presence'), {
+        isLive: false,
+        lastSeen: serverTimestamp(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true }).catch(() => {});
+    } catch {}
+    localStorage.setItem('natal_owner_live', 'false');
+    window.dispatchEvent(new CustomEvent('natal_owner_presence_changed', { detail: { isLive: false } }));
+
     try {
       await signOut(auth);
     } catch {}
@@ -489,8 +618,8 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     setAdminAuthError('');
     const emailClean = adminAuthEmail.trim().toLowerCase();
 
-    if (!emailClean) {
-      setAdminAuthError('Please enter your administrator email address.');
+    if (!emailClean || !isValidEmail(emailClean)) {
+      setAdminAuthError('Please enter a valid administrator email address.');
       return;
     }
 
@@ -498,6 +627,17 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     if (!emailClean.includes('admin')) {
       setAdminAuthError('Admin access denied: Your email address must contain the word "admin" (e.g. admin@nataldesign.com or name.admin@gmail.com).');
       return;
+    }
+
+    if (adminAuthMode === 'register') {
+      if (!adminAuthName.trim() || !isValidName(adminAuthName)) {
+        setAdminAuthError('Admin name must contain letters only (no numbers, digits or symbols) and be at least 2 characters.');
+        return;
+      }
+      if (adminAuthPhone.trim() && !isValidPhone(adminAuthPhone)) {
+        setAdminAuthError('Please enter a valid phone number (at least 7 digits).');
+        return;
+      }
     }
 
     if (!adminAuthPassword || adminAuthPassword.length < 6) {
@@ -667,13 +807,35 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     let unsubServices = () => {};
     let unsubMedia = () => {};
 
+    // Safe timestamp sorting helper so Firestore never drops items with null/missing/custom timestamps
+    const sortByTimestamp = (items: any[]) => {
+      return [...items].sort((a: any, b: any) => {
+        const timeA = a.createdAt?.seconds ? a.createdAt.seconds * 1000 : (a.createdAt ? new Date(a.createdAt).getTime() : (a.updatedAt?.seconds ? a.updatedAt.seconds * 1000 : (a.updatedAt ? new Date(a.updatedAt).getTime() : 0)));
+        const timeB = b.createdAt?.seconds ? b.createdAt.seconds * 1000 : (b.createdAt ? new Date(b.createdAt).getTime() : (b.updatedAt?.seconds ? b.updatedAt.seconds * 1000 : (b.updatedAt ? new Date(b.updatedAt).getTime() : 0)));
+        return timeB - timeA;
+      });
+    };
+
+    // Broadcast live presence to Firestore and window
+    try {
+      setDoc(doc(db, 'site_settings', 'owner_presence'), {
+        isLive: true,
+        ownerName: currentAdminName,
+        ownerEmail: currentAdminEmail,
+        lastActive: serverTimestamp(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true }).catch(() => {});
+    } catch {}
+    localStorage.setItem('natal_owner_live', 'true');
+    window.dispatchEvent(new CustomEvent('natal_owner_presence_changed', { detail: { isLive: true } }));
+
     // Auto-seed initial baseline catalog to Firestore if database is empty
     seedInitialDatabaseIfEmpty(false).catch(e => console.warn("Admin DB auto-seed check:", e));
 
     try {
-      const qMedia = query(collection(db, 'media'), orderBy('createdAt', 'desc'));
-      unsubMedia = onSnapshot(qMedia, (snapshot) => {
-        const fbMedia: any[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const colMedia = collection(db, 'media');
+      unsubMedia = onSnapshot(colMedia, (snapshot) => {
+        const fbMedia: any[] = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         const local = JSON.parse(localStorage.getItem('natal_local_media') || '[]');
         const combined = [...fbMedia];
         local.forEach((lm: any) => {
@@ -688,9 +850,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     }
 
     try {
-      const qServices = query(collection(db, 'services'), orderBy('createdAt', 'desc'));
-      unsubServices = onSnapshot(qServices, (snapshot) => {
-        const fbServices: any[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const colServices = collection(db, 'services');
+      unsubServices = onSnapshot(colServices, (snapshot) => {
+        const fbServices: any[] = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         const localServices = JSON.parse(localStorage.getItem('natal_local_services') || '[]');
         const combined = [...fbServices];
         localServices.forEach((ls: any) => {
@@ -738,9 +900,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     }
 
     try {
-      const qProjects = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
-      unsubProjects = onSnapshot(qProjects, (snapshot) => {
-        const fbProjects = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const colProjects = collection(db, 'projects');
+      unsubProjects = onSnapshot(colProjects, (snapshot) => {
+        const fbProjects = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         
         // Also merge local cache
         const localData = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
@@ -972,9 +1134,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     };
 
     try {
-      const qLeads = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
-      unsubLeads = onSnapshot(qLeads, (snapshot) => {
-        const fbLeads = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const colLeads = collection(db, 'leads');
+      unsubLeads = onSnapshot(colLeads, (snapshot) => {
+        const fbLeads = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         latestFbLeads = fbLeads;
         const localLeads = JSON.parse(localStorage.getItem('natal_local_leads') || '[]');
         const combined = [...fbLeads];
@@ -997,9 +1159,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     }
 
     try {
-      const qTestimonials = query(collection(db, 'testimonials'), orderBy('createdAt', 'desc'));
-      unsubTestimonials = onSnapshot(qTestimonials, (snapshot) => {
-        const fbTestimonials = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const colTestimonials = collection(db, 'testimonials');
+      unsubTestimonials = onSnapshot(colTestimonials, (snapshot) => {
+        const fbTestimonials = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         const localTestimonials = JSON.parse(localStorage.getItem('natal_local_testimonials') || '[]');
         const combined = [...fbTestimonials];
         localTestimonials.forEach((lt: any) => {
@@ -1018,9 +1180,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     }
 
     try {
-      const qTransformations = query(collection(db, 'transformations'), orderBy('createdAt', 'desc'));
-      unsubTransformations = onSnapshot(qTransformations, (snapshot) => {
-        const fbTransformations = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const colTransformations = collection(db, 'transformations');
+      unsubTransformations = onSnapshot(colTransformations, (snapshot) => {
+        const fbTransformations = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         const localTransformations = JSON.parse(localStorage.getItem('natal_local_transformations') || '[]');
         const combined = [...fbTransformations];
         localTransformations.forEach((lt: any) => {
@@ -1040,9 +1202,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
 
     let unsubUsers = () => {};
     try {
-      const qUsers = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
-      unsubUsers = onSnapshot(qUsers, (snapshot) => {
-        const fbUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const colUsers = collection(db, 'users');
+      unsubUsers = onSnapshot(colUsers, (snapshot) => {
+        const fbUsers = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         latestFbUsers = fbUsers;
         setUsers(syncAndAggregateUsers(latestFbUsers, latestFbLeads, latestFbActivities));
       }, (err) => {
@@ -1056,9 +1218,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
 
     let unsubActivities = () => {};
     try {
-      const qActivities = query(collection(db, 'user_activities'), orderBy('createdAt', 'desc'));
-      unsubActivities = onSnapshot(qActivities, (snapshot) => {
-        const fbActivities = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const colActivities = collection(db, 'user_activities');
+      unsubActivities = onSnapshot(colActivities, (snapshot) => {
+        const fbActivities = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         latestFbActivities = fbActivities;
         setUsers(syncAndAggregateUsers(latestFbUsers, latestFbLeads, latestFbActivities));
       }, (err) => {
@@ -1113,7 +1275,137 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     }
   };
 
-  // Handle Add or Update Project
+  // Handlers for Universal Section Cards Editing
+  const handleStartEditCard = (card: any) => {
+    setEditingCardMeta(card);
+    setEditingProjectId(card.id);
+    setTitle(card.title);
+    setDesc(card.desc || card.description || '');
+    setCategory(CATEGORY_OPTIONS.includes(card.category) ? card.category : 'Custom');
+    if (!CATEGORY_OPTIONS.includes(card.category)) {
+      setCustomCategory(card.category);
+    }
+    setImageUrl(card.image || '');
+    setImagePreview(card.image || '');
+    
+    // Smooth scroll to the form box
+    const formBox = document.getElementById('creation-form-box');
+    if (formBox) {
+      formBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      window.scrollTo({ top: 120, behavior: 'smooth' });
+    }
+  };
+
+  const handleCancelEditCard = () => {
+    setEditingProjectId(null);
+    setEditingCardMeta(null);
+    setTitle('');
+    setDesc('');
+    setImageUrl('');
+    setImagePreview('');
+    setCustomCategory('');
+    const savedDefault = localStorage.getItem('natal_default_creation_category') || defaultCategory || CATEGORY_OPTIONS[0];
+    setCategory(savedDefault);
+  };
+
+  const handleDeleteOrResetCard = async (card: any) => {
+    const actionName = card.isBase ? (card.isEdited ? 'revert edits and restore original default content' : 'hide this card') : 'delete this creation';
+    if (!confirm(`Are you sure you want to ${actionName} for "${card.title}"?`)) {
+      return;
+    }
+
+    try {
+      if (card.section === 'showcase') {
+        const docId = card.id;
+        const currentLocal = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
+        const updatedLocal = currentLocal.filter((p: any) => 
+          p.id !== docId && 
+          p.cardHighlightId !== card.cardHighlightId && 
+          (p.originalTitle ? p.originalTitle.toLowerCase() !== card.originalTitle?.toLowerCase() : true)
+        );
+        localStorage.setItem('natal_local_projects', JSON.stringify(updatedLocal));
+
+        if (docId && !docId.startsWith('card-highlight-')) {
+          try {
+            await deleteDoc(doc(db, 'projects', docId));
+          } catch (e) {
+            console.warn("Firestore delete showcase card note:", e);
+          }
+        }
+
+        setProjects(prev => prev.filter(p => 
+          p.id !== docId && 
+          p.cardHighlightId !== card.cardHighlightId && 
+          (p.originalTitle ? p.originalTitle.toLowerCase() !== card.originalTitle?.toLowerCase() : true)
+        ));
+
+        setSuccessNotice(`✓ Featured Interior Creation "${card.title}" reset to original default state.`);
+      } else if (card.section === 'projects') {
+        const docId = card.id;
+        const currentLocal = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
+        const updatedLocal = currentLocal.filter((p: any) => 
+          p.id !== docId && 
+          p.originalId !== card.originalId && 
+          (p.originalTitle ? p.originalTitle.toLowerCase() !== card.originalTitle?.toLowerCase() : true)
+        );
+        localStorage.setItem('natal_local_projects', JSON.stringify(updatedLocal));
+
+        if (docId && !docId.startsWith('project-')) {
+          try {
+            await deleteDoc(doc(db, 'projects', docId));
+          } catch (e) {
+            console.warn("Firestore delete project card note:", e);
+          }
+        }
+
+        setProjects(prev => prev.filter(p => 
+          p.id !== docId && 
+          p.originalId !== card.originalId && 
+          (p.originalTitle ? p.originalTitle.toLowerCase() !== card.originalTitle?.toLowerCase() : true)
+        ));
+
+        setSuccessNotice(`✓ Featured Project "${card.title}" reset to original default.`);
+      } else if (card.section === 'services') {
+        const sId = card.originalId || card.id.replace('service-', '');
+        const currentLocal = JSON.parse(localStorage.getItem('natal_local_services') || '[]');
+        const updatedLocal = currentLocal.filter((s: any) => s.id !== sId && s.originalId !== sId);
+        localStorage.setItem('natal_local_services', JSON.stringify(updatedLocal));
+
+        try {
+          await deleteDoc(doc(db, 'services', sId));
+        } catch (e) {
+          console.warn("Firestore delete service note:", e);
+        }
+
+        setServices(prev => prev.filter(s => s.id !== sId && s.originalId !== sId));
+        setSuccessNotice(`✓ Service card "${card.title}" reset to original default.`);
+      } else if (card.section === 'why_us') {
+        localStorage.removeItem('natal_section_why_us');
+        await saveSectionContent('why_us', defaultWhyUsContent);
+        setSuccessNotice(`✓ Why Choose Us cards restored to original default.`);
+      } else if (card.section === 'process') {
+        localStorage.removeItem('natal_section_process');
+        await saveSectionContent('process', defaultProcessContent);
+        setSuccessNotice(`✓ Process steps restored to original default.`);
+      } else if (card.section === 'hero') {
+        localStorage.removeItem('natal_section_hero');
+        await saveSectionContent('hero', defaultHeroContent);
+        setSuccessNotice(`✓ Hero Quick Cards restored to original default.`);
+      } else if (card.section === 'testimonials') {
+        handleDeleteTestimonial(card.id);
+        setSuccessNotice(`✓ Testimonial "${card.title}" removed.`);
+      } else {
+        handleDeleteProject(card.id);
+        setSuccessNotice(`✓ Creation "${card.title}" deleted.`);
+      }
+      setTimeout(() => setSuccessNotice(''), 4500);
+    } catch (err: any) {
+      console.error("Error resetting/deleting card:", err);
+    }
+  };
+
+  // Handle Add or Update Project / Any Section Card
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !desc || (!imageUrl && !imagePreview)) {
@@ -1125,42 +1417,246 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     const finalCategory = category === "Custom" ? (customCategory || "Interior Design") : category;
     const finalImage = imageUrl || imagePreview;
 
-    const newProjItem = {
-      title,
-      category: finalCategory,
-      desc,
-      image: finalImage,
-      tags: [finalCategory, "Natal Creation"],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
     try {
-      if (editingProjectId) {
-        // Update existing project
-        if (!editingProjectId.startsWith('local_')) {
+      if (editingCardMeta) {
+        const section = editingCardMeta.section;
+
+        if (section === 'showcase') {
+          // Update / override Featured Interior Creation
+          const docId = editingCardMeta.id.startsWith('card-highlight-') ? `custom_${editingCardMeta.id}` : editingCardMeta.id;
+          const payload = {
+            title,
+            category: finalCategory,
+            desc,
+            image: finalImage,
+            section: 'showcase',
+            cardHighlightId: editingCardMeta.cardHighlightId || editingCardMeta.id,
+            originalTitle: editingCardMeta.originalTitle || editingCardMeta.title,
+            tags: [finalCategory, "Featured Interior Creation"],
+            updatedAt: new Date().toISOString()
+          };
+
           try {
-            await updateDoc(doc(db, 'projects', editingProjectId), sanitizeForFirestore({
-              ...newProjItem,
+            await setDoc(doc(db, 'projects', docId), sanitizeForFirestore({
+              ...payload,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
-            }));
+            }), { merge: true });
           } catch (fbErr) {
-            console.warn("Firestore update fallback:", fbErr);
+            console.warn("Firestore showcase write fallback:", fbErr);
           }
+
+          const currentLocal = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
+          const updatedLocal = currentLocal.filter((p: any) => 
+            p.id !== docId && 
+            p.cardHighlightId !== payload.cardHighlightId &&
+            (p.originalTitle ? p.originalTitle.toLowerCase() !== payload.originalTitle.toLowerCase() : true)
+          );
+          updatedLocal.unshift({ id: docId, ...payload });
+          localStorage.setItem('natal_local_projects', JSON.stringify(updatedLocal));
+
+          setProjects(prev => {
+            const rest = prev.filter(p => 
+              p.id !== docId && 
+              p.cardHighlightId !== payload.cardHighlightId &&
+              (p.originalTitle ? p.originalTitle.toLowerCase() !== payload.originalTitle.toLowerCase() : true)
+            );
+            return [{ id: docId, ...payload }, ...rest];
+          });
+
+          setSuccessNotice(`✓ Featured Interior Creation "${title}" updated successfully! Changes are live on the website.`);
+        } else if (section === 'projects') {
+          // Update / override Featured Project
+          const docId = editingCardMeta.id.startsWith('project-') ? `custom_${editingCardMeta.id}` : editingCardMeta.id;
+          const payload = {
+            title,
+            category: finalCategory,
+            desc,
+            description: desc,
+            image: finalImage,
+            section: 'projects',
+            originalId: editingCardMeta.originalId || editingCardMeta.id.replace('project-', ''),
+            originalTitle: editingCardMeta.originalTitle || editingCardMeta.title,
+            servicesUsed: editingCardMeta.servicesUsed || [finalCategory, 'Natal Creation'],
+            beforeImage: editingCardMeta.beforeImage || undefined,
+            tags: [finalCategory, 'Featured Project'],
+            updatedAt: new Date().toISOString()
+          };
+
+          try {
+            await setDoc(doc(db, 'projects', docId), sanitizeForFirestore({
+              ...payload,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            }), { merge: true });
+          } catch (fbErr) {
+            console.warn("Firestore project write fallback:", fbErr);
+          }
+
+          const currentLocal = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
+          const updatedLocal = currentLocal.filter((p: any) => 
+            p.id !== docId && 
+            p.originalId !== payload.originalId &&
+            (p.originalTitle ? p.originalTitle.toLowerCase() !== payload.originalTitle.toLowerCase() : true)
+          );
+          updatedLocal.unshift({ id: docId, ...payload });
+          localStorage.setItem('natal_local_projects', JSON.stringify(updatedLocal));
+
+          setProjects(prev => {
+            const rest = prev.filter(p => 
+              p.id !== docId && 
+              p.originalId !== payload.originalId &&
+              (p.originalTitle ? p.originalTitle.toLowerCase() !== payload.originalTitle.toLowerCase() : true)
+            );
+            return [{ id: docId, ...payload }, ...rest];
+          });
+
+          setSuccessNotice(`✓ Featured Project "${title}" updated successfully! Live on website.`);
+        } else if (section === 'services') {
+          // Update Service
+          const sId = editingCardMeta.originalId || editingCardMeta.id.replace('service-', '');
+          const servicePayload = {
+            id: sId,
+            originalId: sId,
+            title,
+            description: desc,
+            slug: editingCardMeta.slug || title.toLowerCase().replace(/\s+/g, '-'),
+            image: finalImage,
+            icon: editingCardMeta.icon || 'Paintbrush',
+            features: editingCardMeta.features || [finalCategory],
+            updatedAt: new Date().toISOString()
+          };
+
+          try {
+            await setDoc(doc(db, 'services', sId), sanitizeForFirestore({
+              ...servicePayload,
+              updatedAt: serverTimestamp()
+            }), { merge: true });
+          } catch (fbErr) {
+            console.warn("Firestore service write fallback:", fbErr);
+          }
+
+          const currentLocal = JSON.parse(localStorage.getItem('natal_local_services') || '[]');
+          const updatedLocal = currentLocal.filter((s: any) => s.id !== sId);
+          updatedLocal.unshift(servicePayload);
+          localStorage.setItem('natal_local_services', JSON.stringify(updatedLocal));
+
+          setServices(prev => {
+            const rest = prev.filter(s => s.id !== sId);
+            return [servicePayload, ...rest];
+          });
+
+          setSuccessNotice(`✓ Service card "${title}" updated successfully! Live in Our Services.`);
+        } else if (section === 'why_us') {
+          // Update Why Choose Us item
+          const currentContent = JSON.parse(localStorage.getItem('natal_section_why_us') || 'null') || defaultWhyUsContent;
+          const updatedItems = [...(currentContent.items || defaultWhyUsContent.items)];
+          const idx = parseInt(editingCardMeta.id.replace('why-us-', '')) || 0;
+          if (updatedItems[idx]) {
+            updatedItems[idx] = { ...updatedItems[idx], title, description: desc };
+          }
+          const nextWhyUs = { ...currentContent, items: updatedItems };
+          localStorage.setItem('natal_section_why_us', JSON.stringify(nextWhyUs));
+          await saveSectionContent('why_us', nextWhyUs);
+          setSuccessNotice(`✓ Why Choose Us card "${title}" updated successfully! Live on website.`);
+        } else if (section === 'process') {
+          // Update Process step
+          const currentProcess = JSON.parse(localStorage.getItem('natal_section_process') || 'null') || defaultProcessContent;
+          const updatedSteps = [...(currentProcess.steps || defaultProcessContent.steps)];
+          const idx = parseInt(editingCardMeta.id.replace('process-step-', '')) || 0;
+          if (updatedSteps[idx]) {
+            updatedSteps[idx] = { ...updatedSteps[idx], title, description: desc };
+          }
+          const nextProcess = { ...currentProcess, steps: updatedSteps };
+          localStorage.setItem('natal_section_process', JSON.stringify(nextProcess));
+          await saveSectionContent('process', nextProcess);
+          setSuccessNotice(`✓ Process step "${title}" updated successfully! Live on website.`);
+        } else if (section === 'hero') {
+          // Update Hero Quick Card
+          const currentHero = JSON.parse(localStorage.getItem('natal_section_hero') || 'null') || defaultHeroContent;
+          const updatedCards = [...(currentHero.cards || defaultHeroContent.cards)];
+          const idx = parseInt(editingCardMeta.id.replace('hero-card-', '')) || 0;
+          if (updatedCards[idx]) {
+            updatedCards[idx] = { ...updatedCards[idx], label: title, img: finalImage };
+          }
+          const nextHero = { ...currentHero, cards: updatedCards };
+          localStorage.setItem('natal_section_hero', JSON.stringify(nextHero));
+          await saveSectionContent('hero', nextHero);
+          setSuccessNotice(`✓ Hero Quick Card "${title}" updated successfully! Live on website.`);
+        } else if (section === 'testimonials') {
+          // Update Testimonial
+          const tId = editingCardMeta.id;
+          const payload = {
+            id: tId,
+            name: title,
+            role: finalCategory,
+            content: desc,
+            rating: 5,
+            updatedAt: new Date().toISOString()
+          };
+          try {
+            await setDoc(doc(db, 'testimonials', tId), sanitizeForFirestore({
+              ...payload,
+              updatedAt: serverTimestamp()
+            }), { merge: true });
+          } catch (fbErr) {
+            console.warn("Firestore testimonial write fallback:", fbErr);
+          }
+          const currentLocal = JSON.parse(localStorage.getItem('natal_local_testimonials') || '[]');
+          const updatedLocal = currentLocal.filter((t: any) => t.id !== tId);
+          updatedLocal.unshift(payload);
+          localStorage.setItem('natal_local_testimonials', JSON.stringify(updatedLocal));
+          setTestimonials(prev => {
+            const rest = prev.filter(t => t.id !== tId);
+            return [payload, ...rest];
+          });
+          setSuccessNotice(`✓ Testimonial "${title}" updated successfully! Live on website.`);
+        } else {
+          // Regular Project Update
+          const newProjItem = {
+            title,
+            category: finalCategory,
+            desc,
+            image: finalImage,
+            tags: [finalCategory, "Natal Creation"],
+            updatedAt: new Date().toISOString()
+          };
+          if (!editingProjectId.startsWith('local_')) {
+            try {
+              await updateDoc(doc(db, 'projects', editingProjectId), sanitizeForFirestore({
+                ...newProjItem,
+                updatedAt: serverTimestamp()
+              }));
+            } catch (fbErr) {
+              console.warn("Firestore update fallback:", fbErr);
+            }
+          }
+          const currentLocal = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
+          const updatedLocal = currentLocal.filter((p: any) => p.id !== editingProjectId);
+          updatedLocal.unshift({ id: editingProjectId, ...newProjItem });
+          localStorage.setItem('natal_local_projects', JSON.stringify(updatedLocal));
+          setProjects(prev => {
+            const rest = prev.filter(p => p.id !== editingProjectId);
+            return [{ id: editingProjectId, ...newProjItem }, ...rest];
+          });
+          setSuccessNotice(`✓ Creation "${title}" updated successfully!`);
         }
-        const currentLocal = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
-        const updatedLocal = currentLocal.filter((p: any) => p.id !== editingProjectId);
-        updatedLocal.unshift({ id: editingProjectId, ...newProjItem });
-        localStorage.setItem('natal_local_projects', JSON.stringify(updatedLocal));
-        setProjects(prev => {
-          const rest = prev.filter(p => p.id !== editingProjectId);
-          return [{ id: editingProjectId, ...newProjItem }, ...rest];
-        });
+
         setEditingProjectId(null);
-        setSuccessNotice('Creation updated successfully! It has been moved to the top of the homepage and gallery.');
+        setEditingCardMeta(null);
       } else {
-        // Save new project to Firestore
+        // Save new project to Firestore & LocalStorage
+        const newProjItem = {
+          title,
+          category: finalCategory,
+          desc,
+          image: finalImage,
+          section: selectedSectionFilter === 'showcase' ? 'showcase' : 'custom',
+          tags: [finalCategory, "Natal Creation"],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
         let isFbSuccess = false;
         try {
           const docRef = await addDoc(collection(db, 'projects'), sanitizeForFirestore({
@@ -1173,7 +1669,6 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           console.warn("Firestore write error, relying on local backup:", fbErr);
         }
 
-        // Save to LocalStorage backup
         const currentLocal = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
         const savedLocal = deduplicateList([{ id: 'local_' + Date.now(), ...newProjItem }, ...currentLocal]);
         localStorage.setItem('natal_local_projects', JSON.stringify(savedLocal));
@@ -1181,7 +1676,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           setProjects(savedLocal);
         }
 
-        setSuccessNotice('Creation published successfully! It appears at the very top of the homepage and gallery.');
+        setSuccessNotice('✓ Creation published successfully! It appears at the very top of the homepage and gallery.');
       }
 
       // Reset form
@@ -1192,9 +1687,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       setCustomCategory('');
       const savedDefault = localStorage.getItem('natal_default_creation_category') || defaultCategory || CATEGORY_OPTIONS[0];
       setCategory(savedDefault);
-      setTimeout(() => setSuccessNotice(''), 4000);
+      setTimeout(() => setSuccessNotice(''), 4500);
     } catch (error: any) {
-      alert('Error saving project: ' + error.message);
+      alert('Error saving project/card: ' + error.message);
     } finally {
       setIsUploading(false);
     }
@@ -1525,8 +2020,18 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const handleSaveTestimonial = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!tName || !tRole || !tContent) {
+    if (!tName.trim() || !tRole.trim() || !tContent.trim()) {
       alert("Please fill in the client name, role, and feedback content.");
+      return;
+    }
+
+    if (!isValidName(tName)) {
+      alert("Error: Client name must contain letters only (no numbers, digits or symbols).");
+      return;
+    }
+
+    if (!isValidName(tRole)) {
+      alert("Error: Role / Title must contain letters only (no numbers, digits or symbols).");
       return;
     }
 
@@ -1783,6 +2288,44 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     setTimeout(() => setSettingsNotice(''), 4000);
   };
 
+  // Handle Save Email Service Configuration
+  const handleSaveEmailConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveEmailServiceSettings(emailConfig);
+    setEmailConfigSaved('Email service configuration saved successfully!');
+    setTimeout(() => setEmailConfigSaved(''), 4000);
+  };
+
+  // Handle Send Test Email Notification
+  const handleSendTestMail = async () => {
+    setIsSendingTestMail(true);
+    setMailNotice('');
+    try {
+      const res = await triggerOwnerEmailNotification({
+        leadType: 'Contact Form',
+        name: 'Email Integration Test Verification',
+        email: emailConfig.recipientEmail || 'mukisavicent7777@gmail.com',
+        phone: '0700000000',
+        service: 'Email Service Live Check',
+        details: `This is a live test notification dispatched to verify that the website is connected to the email service and delivering client inquiries directly to ${emailConfig.recipientEmail}.`
+      });
+
+      const prov = (res as any)?.providerResult;
+      if (prov && (prov.activated === false || (prov.message && prov.message.toLowerCase().includes('activate')))) {
+        setMailNotice(`⚠️ 1-Time Activation Sent: FormSubmit has dispatched an activation email to ${res.recipient || emailConfig.recipientEmail}. Please check your inbox (including Spam/Junk folder) and click "Activate Form" once to complete setup.`);
+      } else if (res.success) {
+        setMailNotice(`✅ Test email dispatched to ${res.recipient || emailConfig.recipientEmail}! Check your inbox and Spam/Junk folder.`);
+      } else {
+        setMailNotice('Dispatched test email. Please check your inbox and Spam/Junk folder.');
+      }
+    } catch (e: any) {
+      setMailNotice('Notification note: ' + (e?.message || 'Payload processed.'));
+    } finally {
+      setIsSendingTestMail(false);
+      setTimeout(() => setMailNotice(''), 12000);
+    }
+  };
+
   // -------------------------------------------------------------
   // User Directory Handlers & Filtering
   // -------------------------------------------------------------
@@ -1987,30 +2530,54 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
               {adminAuthMode === 'register' && (
                 <>
                   <div>
-                    <label className="block text-[11px] uppercase tracking-wider text-gray-300 font-semibold mb-1 flex items-center gap-1.5 font-mono">
-                      <User size={13} className="text-gold" />
-                      <span>Admin Full Name *</span>
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] uppercase tracking-wider text-gray-300 font-semibold flex items-center gap-1.5 font-mono">
+                        <User size={13} className="text-gold" />
+                        <span>Admin Full Name *</span>
+                      </label>
+                    </div>
                     <input
                       type="text"
                       required
                       value={adminAuthName}
-                      onChange={(e) => setAdminAuthName(e.target.value)}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        const clean = sanitizeNameInput(raw);
+                        if (CONTAINS_DIGITS_OR_SYMBOLS_REGEX.test(raw) || (raw && raw !== clean)) {
+                          setAdminAuthError('Admin name must contain letters only (no numbers or symbols).');
+                        } else {
+                          setAdminAuthError('');
+                        }
+                        setAdminAuthName(clean);
+                      }}
+                      onKeyDown={(e) => handleNameKeyDown(e, setAdminAuthError)}
+                      onPaste={(e) => handleNamePaste(e, setAdminAuthName, setAdminAuthError)}
+                      inputMode="text"
+                      autoComplete="name"
                       placeholder="e.g. Master Administrator"
                       className="w-full bg-black-pure border border-white/20 focus:border-gold px-3.5 py-2.5 text-white text-xs sm:text-sm focus:outline-none transition-colors"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] uppercase tracking-wider text-gray-300 font-semibold mb-1 flex items-center gap-1.5 font-mono">
-                      <Phone size={13} className="text-gold" />
-                      <span>Phone / Contact Number (Optional)</span>
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] uppercase tracking-wider text-gray-300 font-semibold flex items-center gap-1.5 font-mono">
+                        <Phone size={13} className="text-gold" />
+                        <span>Phone / Contact Number (Optional)</span>
+                      </label>
+                    </div>
                     <input
                       type="tel"
+                      maxLength={10}
                       value={adminAuthPhone}
-                      onChange={(e) => setAdminAuthPhone(e.target.value)}
-                      placeholder="+256 700 000 000"
+                      onChange={(e) => {
+                        const clean = sanitizePhoneInput(e.target.value);
+                        setAdminAuthPhone(clean);
+                      }}
+                      onKeyDown={(e) => handlePhoneKeyDown(e, setAdminAuthError)}
+                      onPaste={(e) => handlePhonePaste(e, setAdminAuthPhone, setAdminAuthError)}
+                      inputMode="tel"
+                      placeholder="0700000000"
                       className="w-full bg-black-pure border border-white/20 focus:border-gold px-3.5 py-2.5 text-white text-xs sm:text-sm focus:outline-none transition-colors font-mono"
                     />
                   </div>
@@ -2027,6 +2594,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   type="email"
                   required
                   value={adminAuthEmail}
+                  pattern="^[^\s@]+@[^\s@]+\.[^\s@]{2,}$"
+                  title="Please enter a valid email address"
+                  autoComplete="email"
                   onChange={(e) => {
                     setAdminAuthEmail(e.target.value);
                     if (adminAuthError) setAdminAuthError('');
@@ -2103,7 +2673,10 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                 className="w-full py-3.5 bg-gradient-to-r from-gold-dark via-gold to-yellow-300 hover:brightness-110 active:scale-[0.99] text-black-pure font-bold uppercase text-xs tracking-widest transition-all shadow-[0_0_20px_rgba(212,175,55,0.4)] cursor-pointer disabled:opacity-50 mt-2 flex items-center justify-center gap-2"
               >
                 {adminAuthLoading ? (
-                  <span>Authenticating...</span>
+                  <span className="flex items-center gap-2">
+                    <GoldSpinner size="xs" />
+                    <span>{adminAuthMode === 'login' ? 'Authenticating...' : 'Registering Administrator...'}</span>
+                  </span>
                 ) : (
                   <>
                     <span>
@@ -2197,23 +2770,6 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
         {/* Top Header */}
         <header className="relative z-10 px-4 sm:px-8 py-4 sm:py-6 flex items-center justify-between border-b border-white/5">
           <NatalLogo className="h-8 sm:h-9" />
-          <div className="flex items-center gap-3">
-            <button 
-              type="button"
-              onClick={handleLogout}
-              className="text-gray-400 hover:text-red-400 transition-colors text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 px-3 py-1.5 rounded border border-white/10 hover:border-red-500/40 cursor-pointer"
-              title="Sign out of admin session"
-            >
-              <LogOut size={13} /> <span>Sign Out</span>
-            </button>
-            <button 
-              type="button"
-              onClick={onNavigateHome}
-              className="text-gold hover:text-white transition-colors text-xs font-mono uppercase tracking-widest flex items-center gap-2 px-3 py-1.5 rounded border border-gold/30 hover:border-gold hover:bg-white/5 cursor-pointer"
-            >
-              <Home size={14} /> <span>Exit</span>
-            </button>
-          </div>
         </header>
 
         {/* Admin Console Card Prompting for Master Passcode */}
@@ -2308,7 +2864,10 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                 className="w-full py-3.5 bg-gradient-to-r from-gold-dark via-gold to-yellow-300 hover:brightness-110 active:scale-[0.99] text-black-pure font-bold uppercase text-xs tracking-widest transition-all shadow-[0_0_20px_rgba(212,175,55,0.4)] cursor-pointer disabled:opacity-50 mt-1 flex items-center justify-center gap-2"
               >
                 {passcodeLoading ? (
-                  <span>Verifying Passcode...</span>
+                  <span className="flex items-center gap-2">
+                    <GoldSpinner size="xs" />
+                    <span>Verifying Passcode...</span>
+                  </span>
                 ) : (
                   <>
                     <Key size={14} className="stroke-[2.5]" />
@@ -2352,55 +2911,15 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   return (
     <div className="min-h-screen bg-black-rich text-white font-sans flex flex-col">
       {/* Top Navigation Bar */}
-      <header className="h-[60px] sm:h-[72px] md:h-[78px] lg:h-[86px] xl:h-[90px] bg-black-pure/95 backdrop-blur-md border-b border-gold/30 px-4 sm:px-6 lg:px-10 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center gap-3 sm:gap-4 lg:gap-6">
-          <NatalLogo className="h-7 sm:h-8 md:h-9 lg:h-10 xl:h-11 transition-all duration-300" variant="small" />
-
-          <div className="hidden sm:flex items-center gap-2 border-l border-gold/30 pl-3 sm:pl-4 lg:pl-5">
-            <span className="text-gold font-mono text-[9px] sm:text-[10px] md:text-xs lg:text-xs tracking-widest uppercase font-semibold">
-              Owner Admin Console
-            </span>
-          </div>
+      <header className="h-[60px] sm:h-[70px] md:h-[76px] lg:h-[82px] bg-black-pure/95 backdrop-blur-md border-b border-gold/30 px-3 sm:px-6 lg:px-10 flex items-center justify-between sticky top-0 z-50">
+        {/* Left Side: Only Logo (Increased size and premium presentation) */}
+        <div className="flex items-center">
+          <NatalLogo className="h-9 sm:h-11 md:h-12 lg:h-14 transition-all duration-300" variant="default" />
         </div>
 
-        {/* Right side Profile & Status */}
-        <div className="flex items-center gap-2.5 sm:gap-4 lg:gap-5 ml-auto">
-          {/* Cloud Firestore Live Status Badge */}
-          <div 
-            className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 bg-emerald-950/60 border border-emerald-500/50 rounded-full shadow-inner cursor-help"
-            title={`Connected to Google Cloud Firebase Firestore\nProject: ${projectId || 'data-lightning-x6shk'}\nDatabase: ${databaseId || 'ai-studio-natalinteriordes'}\nSynced Collections: projects (${projects.length}), services (${services.length}), leads (${leads.length}), users (${users.length}), media (${mediaAssets.length})`}
-          >
-            <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
-            <Database size={12} className="text-emerald-400 hidden sm:inline" />
-            <span className="text-emerald-300 font-mono text-[9px] sm:text-[10px] lg:text-[11px] uppercase tracking-wider font-bold">
-              Firestore Live
-            </span>
-          </div>
-
-          {/* Sync Database Button */}
-          <button
-            type="button"
-            onClick={async () => {
-              setIsSyncingDb(true);
-              try {
-                const res = await seedInitialDatabaseIfEmpty(false);
-                setSuccessNotice(`Firestore verified! Collections synced in real-time. Live Records: ${projects.length} Creations, ${services.length} Services, ${leads.length} Leads, ${users.length} Users, ${mediaAssets.length} Media Files.`);
-                setTimeout(() => setSuccessNotice(''), 5000);
-              } catch (e: any) {
-                alert("Database verification: " + (e?.message || String(e)));
-              } finally {
-                setIsSyncingDb(false);
-              }
-            }}
-            disabled={isSyncingDb}
-            className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-gold/10 hover:bg-gold/25 border border-gold/40 text-gold text-[10px] font-mono uppercase font-bold transition-all cursor-pointer active:scale-95 disabled:opacity-50"
-            title="Verify & synchronize all cloud database records"
-          >
-            <RefreshCw size={11} className={isSyncingDb ? 'animate-spin' : ''} />
-            <span>{isSyncingDb ? 'Syncing...' : 'Sync DB'}</span>
-          </button>
-
-          {/* Notifications */}
+        {/* Right side: Notification icon, then Admin Profile at the right end */}
+        <div className="flex items-center gap-3 sm:gap-4 ml-auto">
+          {/* Notifications Icon with Active Badge */}
           <button 
             type="button"
             onClick={() => switchTab('notifications')}
@@ -2409,54 +2928,67 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                 ? 'text-gold bg-gold/20 border border-gold/50 shadow-[0_0_12px_rgba(212,175,55,0.4)] ring-1 ring-gold/40' 
                 : 'text-gray-300 hover:text-gold hover:bg-white/10 border border-transparent'
             }`}
-            title="System Notifications"
+            title={`System Notifications (${unreadNotificationsCount} unread)`}
             aria-label="System Notifications"
           >
             <Bell size={20} className="w-[18px] h-[18px] sm:w-[20px] sm:h-[20px] lg:w-[22px] lg:h-[22px] transition-transform hover:scale-110" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border border-black-pure animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
-          </button>
-
-          {/* Admin Profile */}
-          <button 
-            type="button"
-            onClick={() => switchTab('profile')}
-            className={`w-7 h-7 sm:w-8 sm:h-8 lg:w-9 lg:h-9 rounded-full border flex items-center justify-center cursor-pointer transition-all relative overflow-hidden ${
-              activeTab === 'profile' 
-                ? 'bg-gold/25 border-gold text-gold shadow-[0_0_15px_rgba(212,175,55,0.5)] ring-2 ring-gold/50' 
-                : 'bg-gold/10 border-gold/40 text-gold/80 hover:bg-gold/20 hover:border-gold hover:text-gold'
-            }`}
-            title={`${currentAdminName} Profile`}
-            aria-label="Admin Profile"
-          >
-            {currentAdminAvatar ? (
-              <img 
-                src={currentAdminAvatar} 
-                alt={currentAdminName} 
-                className="w-full h-full object-cover"
-              />
+            {unreadNotificationsCount > 0 ? (
+              <span 
+                className="absolute -top-1 -right-1 z-10 bg-red-600 text-white font-mono text-[9px] font-extrabold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center border-2 border-black-pure shadow-[0_0_10px_rgba(239,68,68,0.9)] animate-pulse"
+                title={`${unreadNotificationsCount} new unread notifications`}
+              >
+                {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+              </span>
             ) : (
-              <span className="font-mono font-bold text-[10px] sm:text-xs text-gold">
-                {getUserInitials(currentAdminName, currentAdminEmail)}
+              <span 
+                className="absolute -top-0.5 -right-0.5 z-10 flex h-2.5 w-2.5 items-center justify-center pointer-events-none"
+                title="Notifications active"
+              >
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500/80 border border-black-pure shadow-[0_0_4px_rgba(239,68,68,0.7)]"></span>
               </span>
             )}
-            <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 sm:w-2.5 sm:h-2.5 bg-emerald-500 border-[1.5px] border-black-pure rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse"></span>
           </button>
 
-          {/* Prominent Header Sign Out Button */}
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-sm border border-red-500/50 bg-red-950/40 hover:bg-red-900/60 hover:border-red-400 text-red-200 hover:text-white transition-all text-[11px] sm:text-xs font-mono uppercase tracking-wider font-bold shadow-sm cursor-pointer active:scale-95 ml-1"
-            title="Sign Out of Admin Dashboard"
-          >
-            <LogOut size={14} className="text-red-400 shrink-0 stroke-[2.2]" />
-            <span>Sign Out</span>
-          </button>
+          {/* Admin Profile at the Right End with Circular Live Dot on Top */}
+          <div className="relative">
+            <button 
+              type="button"
+              onClick={() => switchTab('profile')}
+              className={`w-8 h-8 sm:w-9 sm:h-9 lg:w-9.5 lg:h-9.5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all relative overflow-hidden ${
+                activeTab === 'profile' 
+                  ? 'bg-gold/25 border-gold text-gold shadow-[0_0_15px_rgba(212,175,55,0.5)] ring-2 ring-gold/50' 
+                  : 'bg-gold/10 border-gold/50 text-gold/80 hover:bg-gold/20 hover:border-gold hover:text-gold'
+              }`}
+              title={`${currentAdminName} Profile (Owner Live)`}
+              aria-label="Admin Profile"
+            >
+              {currentAdminAvatar ? (
+                <img 
+                  src={currentAdminAvatar} 
+                  alt={currentAdminName} 
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="font-mono font-bold text-[10px] sm:text-xs text-gold">
+                  {getUserInitials(currentAdminName, currentAdminEmail)}
+                </span>
+              )}
+            </button>
+
+            {/* Circular Live Dot on top of Admin Profile */}
+            <span 
+              className="absolute -top-0.5 -right-0.5 flex h-3 w-3 sm:h-3.5 sm:w-3.5 items-center justify-center pointer-events-none"
+              title="Owner Live"
+            >
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-emerald-500 border-[1.5px] border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
+            </span>
+          </div>
         </div>
       </header>
 
-      {/* Main Workspace Body - Enhanced layout and spacing for laptop screens */}
-      <div className="max-w-[1720px] mx-auto w-full px-4 sm:px-6 lg:px-10 py-5 sm:py-6 lg:py-6 flex-1 flex flex-col md:flex-row gap-5 sm:gap-6 lg:gap-8 relative">
+      {/* Main Workspace Body - Full width on phone screens, elegant layout on larger screens */}
+      <div className="max-w-[1720px] mx-auto w-full px-1.5 sm:px-6 lg:px-10 py-3 sm:py-6 lg:py-6 flex-1 flex flex-col md:flex-row gap-4 sm:gap-6 lg:gap-8 relative">
         {/* Mobile Overlay */}
         {isSidebarOpen && (
           <div 
@@ -2491,7 +3023,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
             {/* Admin Identity Card in Sidebar */}
             <div 
               onClick={() => switchTab('profile')}
-              className="mb-4 p-3 bg-gradient-to-r from-gold/15 via-black-rich to-black-pure border border-gold/40 rounded-sm hover:border-gold transition-all cursor-pointer flex items-center gap-3 group shadow-md"
+              className="mb-5 p-3.5 bg-gradient-to-r from-gold/15 via-black-rich to-black-pure border border-gold/40 rounded-sm hover:border-gold transition-all cursor-pointer flex items-center gap-3.5 group shadow-md"
               title="Click to view and edit Admin Profile"
             >
               <div className="relative shrink-0">
@@ -2502,210 +3034,177 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     <span>{getUserInitials(currentAdminName, currentAdminEmail)}</span>
                   )}
                 </div>
-                <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
+                <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 border border-black-pure"></span>
                 </span>
               </div>
               <div className="overflow-hidden min-w-0 flex-1">
-                <div className="text-xs font-bold text-white truncate font-heading group-hover:text-gold transition-colors">
-                  {currentAdminName}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <div className="text-xs font-bold text-white truncate font-heading group-hover:text-gold transition-colors">
+                    {currentAdminName}
+                  </div>
                 </div>
                 <div className="text-[10px] text-gray-400 truncate font-mono">
                   {currentAdminEmail}
                 </div>
                 <div className="text-[9px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
-                  <span className="w-1 h-1 rounded-full bg-emerald-400 inline-block"></span>
-                  <span>Administrator Active</span>
+                  <span className="w-1 h-1 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
+                  <span>Administrator · Verified Studio Owner</span>
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-col gap-5">
-              {/* Content Management Group */}
-              <div>
-                <h4 className="text-[10px] font-mono text-gold/70 uppercase tracking-widest mb-2 px-1">Content Management</h4>
-                <div className="flex flex-col gap-1.5">
-                  <button 
-                    onClick={() => switchTab('projects')}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-xs uppercase tracking-widest font-bold transition-all text-left cursor-pointer ${
-                      activeTab === 'projects' 
-                        ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_10px_rgba(212,175,55,0.2)]' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <ImageIcon size={16} className={activeTab === 'projects' ? 'text-gold' : 'text-gray-400'} /> Creations
-                  </button>
+            {/* Unified Navigation Tabs (Single Group / Continuous Flow without Fragmented Headers or Badges) */}
+            <nav className="flex flex-col gap-1.5" aria-label="Admin Dashboard Navigation">
+              <button 
+                onClick={() => switchTab('projects')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                  activeTab === 'projects' 
+                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <ImageIcon size={16} className={activeTab === 'projects' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                <span className="whitespace-nowrap truncate">Creations</span>
+              </button>
 
-                  <button 
-                    onClick={() => switchTab('services')}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 text-xs uppercase tracking-widest font-bold transition-all text-left cursor-pointer ${
-                      activeTab === 'services' 
-                        ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_10px_rgba(212,175,55,0.2)]' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Briefcase size={16} className={activeTab === 'services' ? 'text-gold' : 'text-gray-400'} /> Our Services
-                    </div>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold ${
-                      activeTab === 'services' ? 'bg-gold text-black-pure' : 'bg-gold/20 text-gold'
-                    }`}>
-                      {allCombinedServices.length}
-                    </span>
-                  </button>
+              <button 
+                onClick={() => switchTab('services')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                  activeTab === 'services' 
+                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <Briefcase size={16} className={activeTab === 'services' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                <span className="whitespace-nowrap truncate">Our Services</span>
+              </button>
 
-                  <button 
-                    onClick={() => switchTab('testimonials')}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-xs uppercase tracking-widest font-bold transition-all text-left cursor-pointer ${
-                      activeTab === 'testimonials' 
-                        ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_10px_rgba(212,175,55,0.2)]' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <ShieldCheck size={16} className={activeTab === 'testimonials' ? 'text-gold' : 'text-gray-400'} /> Testimonials
-                  </button>
+              <button 
+                onClick={() => switchTab('testimonials')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                  activeTab === 'testimonials' 
+                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <ShieldCheck size={16} className={activeTab === 'testimonials' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                <span className="whitespace-nowrap truncate">Testimonials</span>
+              </button>
 
-                  <button 
-                    onClick={() => switchTab('transformations')}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-xs uppercase tracking-widest font-bold transition-all text-left cursor-pointer ${
-                      activeTab === 'transformations' 
-                        ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_10px_rgba(212,175,55,0.2)]' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <SplitSquareHorizontal size={16} className={activeTab === 'transformations' ? 'text-gold' : 'text-gray-400'} /> Before & After
-                  </button>
+              <button 
+                onClick={() => switchTab('transformations')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                  activeTab === 'transformations' 
+                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <SplitSquareHorizontal size={16} className={activeTab === 'transformations' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                <span className="whitespace-nowrap truncate">Before &amp; After</span>
+              </button>
 
-                  <button 
-                    onClick={() => switchTab('sections')}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 text-xs uppercase tracking-widest font-bold transition-all text-left cursor-pointer ${
-                      activeTab === 'sections' 
-                        ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_10px_rgba(212,175,55,0.2)]' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Edit3 size={16} className={activeTab === 'sections' ? 'text-gold' : 'text-gray-400'} /> Brand Logo & Sections
-                    </div>
-                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-gold/15 text-gold border border-gold/30">
-                      Logo & Hero
-                    </span>
-                  </button>
+              <button 
+                onClick={() => switchTab('sections')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                  activeTab === 'sections' 
+                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <Edit3 size={16} className={activeTab === 'sections' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                <span className="whitespace-nowrap truncate">Brand Logo &amp; Sections</span>
+              </button>
 
-                  <button 
-                    onClick={() => switchTab('media')}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 text-xs uppercase tracking-widest font-bold transition-all text-left cursor-pointer ${
-                      activeTab === 'media' 
-                        ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_10px_rgba(212,175,55,0.2)]' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <FolderArchive size={16} className={activeTab === 'media' ? 'text-gold' : 'text-gray-400'} /> Media & Vault
-                    </div>
-                    {mediaAssets.length > 0 && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold ${
-                        activeTab === 'media' ? 'bg-gold text-black-pure' : 'bg-gold/20 text-gold'
-                      }`}>
-                        {mediaAssets.length}
-                      </span>
-                    )}
-                  </button>
+              <button 
+                onClick={() => switchTab('media')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                  activeTab === 'media' 
+                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <FolderArchive size={16} className={activeTab === 'media' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                <span className="whitespace-nowrap truncate">Media &amp; Vault</span>
+              </button>
+
+              <button 
+                onClick={() => switchTab('leads')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                  activeTab === 'leads' 
+                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <Users size={16} className={activeTab === 'leads' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                <span className="whitespace-nowrap truncate">Leads</span>
+              </button>
+
+              <button 
+                onClick={() => switchTab('users')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                  activeTab === 'users' 
+                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <UserCheck size={16} className={activeTab === 'users' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                <span className="whitespace-nowrap truncate">Users</span>
+              </button>
+
+              <button 
+                onClick={() => switchTab('notifications')}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                  activeTab === 'notifications' 
+                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <Bell size={16} className={activeTab === 'notifications' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                  <span className="whitespace-nowrap truncate">Notifications</span>
                 </div>
-              </div>
+                {unreadNotificationsCount > 0 && (
+                  <span className="ml-2 px-1.5 py-0.5 bg-red-600 text-white font-mono text-[10px] font-extrabold rounded-full min-w-[18px] h-[18px] flex items-center justify-center shadow-md animate-pulse shrink-0">
+                    {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                  </span>
+                )}
+              </button>
 
-              {/* CRM & Activity Group */}
-              <div>
-                <h4 className="text-[10px] font-mono text-gold/70 uppercase tracking-widest mb-2 px-1">CRM & Activity</h4>
-                <div className="flex flex-col gap-1.5">
-                  <button 
-                    onClick={() => switchTab('leads')}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 text-xs uppercase tracking-widest font-bold transition-all text-left cursor-pointer ${
-                      activeTab === 'leads' 
-                        ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_10px_rgba(212,175,55,0.2)]' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Users size={16} className={activeTab === 'leads' ? 'text-gold' : 'text-gray-400'} /> Leads
-                    </div>
-                    {leads.length > 0 && (
-                      <span className="bg-gold text-black-pure text-[10px] px-1.5 py-0.5 rounded font-bold">
-                        {leads.length}
-                      </span>
-                    )}
-                  </button>
+              <button 
+                onClick={() => switchTab('profile')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                  activeTab === 'profile' 
+                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <User size={16} className={activeTab === 'profile' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                <span className="whitespace-nowrap truncate">Admin Profile</span>
+              </button>
 
-                  <button 
-                    onClick={() => switchTab('users')}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 text-xs uppercase tracking-widest font-bold transition-all text-left cursor-pointer ${
-                      activeTab === 'users' 
-                        ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_10px_rgba(212,175,55,0.2)]' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <UserCheck size={16} className={activeTab === 'users' ? 'text-gold' : 'text-gray-400'} /> Users
-                    </div>
-                    {users.length > 0 && (
-                      <span className="bg-gold text-black-pure text-[10px] px-1.5 py-0.5 rounded font-bold">
-                        {users.length}
-                      </span>
-                    )}
-                  </button>
+              <button 
+                onClick={() => switchTab('settings')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                  activeTab === 'settings' 
+                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <Key size={16} className={activeTab === 'settings' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                <span className="whitespace-nowrap truncate">Security</span>
+              </button>
+            </nav>
 
-                  <button 
-                    onClick={() => switchTab('notifications')}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 text-xs uppercase tracking-widest font-bold transition-all text-left cursor-pointer ${
-                      activeTab === 'notifications' 
-                        ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_10px_rgba(212,175,55,0.2)]' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Bell size={16} className={activeTab === 'notifications' ? 'text-gold' : 'text-gray-400'} /> Notifications
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* System Settings Group */}
-              <div>
-                <h4 className="text-[10px] font-mono text-gold/70 uppercase tracking-widest mb-2 px-1">System</h4>
-                <div className="flex flex-col gap-1.5">
-                  <button 
-                    onClick={() => switchTab('profile')}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-xs uppercase tracking-widest font-bold transition-all text-left cursor-pointer ${
-                      activeTab === 'profile' 
-                        ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_10px_rgba(212,175,55,0.2)]' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <User size={16} className={activeTab === 'profile' ? 'text-gold' : 'text-gray-400'} /> Admin Profile
-                  </button>
-
-                  <button 
-                    onClick={() => switchTab('settings')}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-xs uppercase tracking-widest font-bold transition-all text-left cursor-pointer ${
-                      activeTab === 'settings' 
-                        ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_10px_rgba(212,175,55,0.2)]' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <Key size={16} className={activeTab === 'settings' ? 'text-gold' : 'text-gray-400'} /> Security
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-5 border-t border-gold/20 mt-auto mb-1">
+            {/* Prominent Sidebar Sign Out Button */}
+            <div className="pt-6 pb-2 border-t border-gold/25 mt-auto">
               <button 
                 onClick={handleLogout}
-                className="w-full py-2.5 px-3 text-center text-xs text-red-200 border border-red-500/40 bg-red-950/40 hover:bg-red-900/60 hover:border-red-400 hover:text-white transition-all font-mono flex items-center justify-center gap-2 uppercase tracking-wider rounded-sm cursor-pointer font-bold shadow-sm active:scale-95"
+                className="w-full py-3 sm:py-3.5 px-4 text-center text-xs sm:text-sm text-red-200 border border-red-500/50 bg-red-950/40 hover:bg-red-900/60 hover:border-red-400 hover:text-white transition-all font-mono flex items-center justify-center gap-2.5 uppercase tracking-wider rounded-sm cursor-pointer font-bold shadow-md active:scale-95 group"
                 title="Sign Out of Administrator Account"
               >
-                <LogOut size={15} className="text-red-400 stroke-[2.2]" />
+                <LogOut size={16} className="text-red-400 group-hover:text-white transition-colors stroke-[2.2] shrink-0" />
                 <span>Sign Out</span>
               </button>
             </div>
@@ -2728,7 +3227,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   {activeTab === 'testimonials' && 'Testimonials & Reviews'}
                   {activeTab === 'transformations' && 'Before & After Transformations'}
                   {activeTab === 'sections' && 'Website Sections & Brand Editor'}
-                  {activeTab === 'media' && 'Media & Asset Vault (Photos, CAD Plans & Videos)'}
+                  {activeTab === 'media' && 'Media & Asset Vault'}
                   {activeTab === 'notifications' && 'System Notifications'}
                   {activeTab === 'settings' && 'Master Passcode & Security'}
                   {activeTab === 'profile' && 'Administrator Profile'}
@@ -2741,6 +3240,10 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
               <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5">
                 <span className="text-gray-400">Creations:</span>
                 <span className="text-gold font-bold">{projects.length}</span>
+              </div>
+              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5">
+                <span className="text-gray-400">Services:</span>
+                <span className="text-gold font-bold">{allCombinedServices.length}</span>
               </div>
               <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5">
                 <span className="text-gray-400">Leads:</span>
@@ -2758,7 +3261,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           </div>
 
           {/* Mobile & Tablet Bar: Back Home Arrow & Extended Hamburger Menu */}
-          <div className="md:hidden flex items-center justify-between mb-8 border-b border-gold/20 pb-4 px-4 sm:px-6">
+          <div className="md:hidden flex items-center justify-between mb-5 border-b border-gold/20 pb-3 px-1 sm:px-6">
             <div className="flex items-center gap-4">
               {/* Back Home Arrow directly linking admin back */}
               <button 
@@ -2772,10 +3275,15 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
               {/* Hamburger Menu extended and positioned slightly to the right */}
               <button 
                 onClick={() => setIsSidebarOpen(true)}
-                className="text-gray-300 hover:text-gold transition-colors p-1 cursor-pointer ml-1"
+                className="text-gray-300 hover:text-gold transition-colors p-1 cursor-pointer ml-1 relative"
                 title="Open Admin Navigation Menu"
               >
                 <Menu size={24} />
+                {unreadNotificationsCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-600 text-white font-mono text-[8px] font-extrabold rounded-full min-w-[15px] h-[15px] px-0.5 flex items-center justify-center border border-black-pure shadow-md animate-pulse">
+                    {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                  </span>
+                )}
               </button>
             </div>
 
@@ -2784,25 +3292,326 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
             </span>
           </div>
 
-          <div className="px-4 sm:px-6 md:px-0">
+          <div className="px-0 sm:px-2 md:px-0 w-full">
             {/* TAB 1: PROJECTS & CREATIONS */}
-          {activeTab === 'projects' && (
+          {activeTab === 'projects' && (() => {
+            // 1. Featured Interior Creations (Showcase) - 16 base cards
+            const allShowcaseCards = cardHighlights.map((ch, idx) => {
+              const defaultId = `card-highlight-${idx}`;
+              const edited = projects.find((p: any) => 
+                p.cardHighlightId === defaultId || 
+                p.id === defaultId ||
+                (p.originalTitle && p.originalTitle.trim().toLowerCase() === ch.title.trim().toLowerCase()) ||
+                (p.section === 'showcase' && p.title.trim().toLowerCase() === ch.title.trim().toLowerCase())
+              );
+
+              if (edited) {
+                return {
+                  id: edited.id,
+                  cardHighlightId: defaultId,
+                  title: edited.title,
+                  category: edited.category,
+                  image: edited.image,
+                  desc: edited.desc || edited.description || '',
+                  section: 'showcase',
+                  sectionLabel: 'Featured Interior Creations',
+                  originalTitle: ch.title,
+                  isBase: true,
+                  isEdited: true
+                };
+              }
+
+              return {
+                id: defaultId,
+                cardHighlightId: defaultId,
+                title: ch.title,
+                category: ch.category,
+                image: ch.image,
+                desc: ch.desc,
+                section: 'showcase',
+                sectionLabel: 'Featured Interior Creations',
+                originalTitle: ch.title,
+                isBase: true,
+                isEdited: false
+              };
+            });
+
+            // 2. Featured Projects (Portfolio) - 8 base cards
+            const projectCards = projectsData.map((bp) => {
+              const defaultId = `project-${bp.id}`;
+              const edited = projects.find((p: any) => 
+                p.originalId === bp.id || 
+                p.id === defaultId ||
+                (p.originalTitle && p.originalTitle.trim().toLowerCase() === bp.title.trim().toLowerCase()) ||
+                (p.section === 'projects' && p.title.trim().toLowerCase() === bp.title.trim().toLowerCase())
+              );
+
+              if (edited) {
+                return {
+                  id: edited.id,
+                  originalId: bp.id,
+                  title: edited.title,
+                  category: edited.category,
+                  image: edited.image,
+                  desc: edited.desc || edited.description || '',
+                  servicesUsed: edited.servicesUsed || bp.servicesUsed,
+                  beforeImage: edited.beforeImage || bp.beforeImage,
+                  section: 'projects',
+                  sectionLabel: 'Featured Projects',
+                  originalTitle: bp.title,
+                  isBase: true,
+                  isEdited: true
+                };
+              }
+
+              return {
+                id: defaultId,
+                originalId: bp.id,
+                title: bp.title,
+                category: bp.category,
+                image: bp.image,
+                desc: bp.description,
+                servicesUsed: bp.servicesUsed,
+                beforeImage: bp.beforeImage,
+                section: 'projects',
+                sectionLabel: 'Featured Projects',
+                originalTitle: bp.title,
+                isBase: true,
+                isEdited: false
+              };
+            });
+
+            // 3. Our Services - 6 base cards
+            const serviceCards = servicesData.map((s) => {
+              const defaultId = `service-${s.id}`;
+              const edited = services.find((es: any) => 
+                es.id === s.id || 
+                es.originalId === s.id || 
+                (es.title && es.title.trim().toLowerCase() === s.title.trim().toLowerCase())
+              );
+
+              const defaultImage = (cardHighlights.find(c => c.category === s.title)?.image) || 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&q=80&w=1200';
+
+              if (edited) {
+                return {
+                  id: edited.id || defaultId,
+                  originalId: s.id,
+                  title: edited.title,
+                  category: 'Our Services',
+                  image: edited.image || defaultImage,
+                  desc: edited.description || edited.desc || '',
+                  features: edited.features || s.features,
+                  slug: edited.slug || s.slug,
+                  icon: edited.icon || s.icon,
+                  section: 'services',
+                  sectionLabel: 'Our Services',
+                  originalTitle: s.title,
+                  isBase: true,
+                  isEdited: true
+                };
+              }
+
+              return {
+                id: defaultId,
+                originalId: s.id,
+                title: s.title,
+                category: 'Our Services',
+                image: defaultImage,
+                desc: s.description,
+                features: s.features,
+                slug: s.slug,
+                icon: s.icon,
+                section: 'services',
+                sectionLabel: 'Our Services',
+                originalTitle: s.title,
+                isBase: true,
+                isEdited: false
+              };
+            });
+
+            // 4. Why Choose Us - 5 cards
+            const savedWhyUs = (() => {
+              try {
+                return JSON.parse(localStorage.getItem('natal_section_why_us') || 'null');
+              } catch {
+                return null;
+              }
+            })();
+            const whyUsItems = (savedWhyUs && savedWhyUs.items && savedWhyUs.items.length > 0) ? savedWhyUs.items : whyChooseUsData;
+            const whyUsCards = whyUsItems.map((w: any, idx: number) => ({
+              id: `why-us-${idx}`,
+              title: w.title,
+              category: 'Why Choose Us',
+              image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=1200',
+              desc: w.description || w.desc || '',
+              section: 'why_us',
+              sectionLabel: 'Why Choose Us',
+              originalTitle: whyChooseUsData[idx]?.title || w.title,
+              isBase: true,
+              isEdited: !!savedWhyUs
+            }));
+
+            // 5. The Process - 5 cards
+            const savedProcess = (() => {
+              try {
+                return JSON.parse(localStorage.getItem('natal_section_process') || 'null');
+              } catch {
+                return null;
+              }
+            })();
+            const processItems = (savedProcess && savedProcess.steps && savedProcess.steps.length > 0) ? savedProcess.steps : (defaultProcessContent.steps || []);
+            const processCards = processItems.map((st: any, idx: number) => ({
+              id: `process-step-${idx}`,
+              title: st.title,
+              category: 'The Process',
+              image: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=1200',
+              desc: st.description || st.desc || '',
+              section: 'process',
+              sectionLabel: 'The Process',
+              originalTitle: (defaultProcessContent.steps?.[idx]?.title) || st.title,
+              isBase: true,
+              isEdited: !!savedProcess
+            }));
+
+            // 6. Hero Quick Cards - 4 cards
+            const savedHero = (() => {
+              try {
+                return JSON.parse(localStorage.getItem('natal_section_hero') || 'null');
+              } catch {
+                return null;
+              }
+            })();
+            const heroCardItems = (savedHero && savedHero.cards && savedHero.cards.length > 0) ? savedHero.cards : (defaultHeroContent.cards || []);
+            const heroCards = heroCardItems.map((h: any, idx: number) => ({
+              id: `hero-card-${idx}`,
+              title: h.label || `Hero Card ${idx + 1}`,
+              category: 'Hero Quick Cards',
+              image: h.img || defaultHeroContent.cards[idx]?.img,
+              desc: `Quick card #${idx + 1} displayed in homepage hero showcase.`,
+              section: 'hero',
+              sectionLabel: 'Hero Quick Cards',
+              originalTitle: defaultHeroContent.cards[idx]?.label || h.label,
+              isBase: true,
+              isEdited: !!savedHero
+            }));
+
+            // 7. Testimonials - 3 cards
+            const testimonialCards = (testimonials.length > 0 ? testimonials : testimonialsData).map((t: any, idx: number) => ({
+              id: t.id || `testimonial-${idx}`,
+              title: t.name,
+              category: t.role || 'Testimonial',
+              image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=400',
+              desc: t.content,
+              section: 'testimonials',
+              sectionLabel: 'Testimonials',
+              originalTitle: t.name,
+              isBase: true,
+              isEdited: !!t.createdAt
+            }));
+
+            // 8. Custom user uploads
+            const customUploadedCards = projects.filter((p: any) => 
+              !p.section || p.section === 'custom' || (!p.cardHighlightId && !p.originalId && !p.isBaseProject)
+            ).map((p: any) => ({
+              id: p.id,
+              title: p.title,
+              category: p.category,
+              image: p.image,
+              desc: p.desc || p.description || '',
+              section: 'custom',
+              sectionLabel: 'Custom Uploads',
+              originalTitle: p.title,
+              isBase: false,
+              isEdited: true
+            }));
+
+            const allCombinedCards = [
+              ...allShowcaseCards,
+              ...projectCards,
+              ...serviceCards,
+              ...whyUsCards,
+              ...processCards,
+              ...heroCards,
+              ...testimonialCards,
+              ...customUploadedCards
+            ];
+
+            let visibleSectionCards: any[] = allShowcaseCards;
+            if (selectedSectionFilter === 'showcase') {
+              visibleSectionCards = allShowcaseCards;
+            } else if (selectedSectionFilter === 'projects') {
+              visibleSectionCards = projectCards;
+            } else if (selectedSectionFilter === 'services') {
+              visibleSectionCards = serviceCards;
+            } else if (selectedSectionFilter === 'why_us') {
+              visibleSectionCards = whyUsCards;
+            } else if (selectedSectionFilter === 'process') {
+              visibleSectionCards = processCards;
+            } else if (selectedSectionFilter === 'hero') {
+              visibleSectionCards = heroCards;
+            } else if (selectedSectionFilter === 'testimonials') {
+              visibleSectionCards = testimonialCards;
+            } else if (selectedSectionFilter === 'custom') {
+              visibleSectionCards = customUploadedCards;
+            } else if (selectedSectionFilter === 'all') {
+              visibleSectionCards = allCombinedCards;
+            }
+
+            if (cardSearchQuery.trim()) {
+              const q = cardSearchQuery.trim().toLowerCase();
+              visibleSectionCards = visibleSectionCards.filter(c => 
+                (c.title || '').toLowerCase().includes(q) ||
+                (c.category || '').toLowerCase().includes(q) ||
+                (c.desc || '').toLowerCase().includes(q) ||
+                (c.sectionLabel || '').toLowerCase().includes(q)
+              );
+            }
+
+            return (
             <div className="space-y-8">
               {/* Success Notification */}
               {successNotice && (
                 <div className="p-4 bg-emerald-950/70 border border-emerald-500/60 text-emerald-200 text-sm flex items-center gap-2">
-                  <CheckCircle size={18} className="text-emerald-400" />
-                  {successNotice}
+                  <CheckCircle size={18} className="text-emerald-400 shrink-0" />
+                  <span>{successNotice}</span>
                 </div>
               )}
 
-              {/* Upload Form Box */}
-              <div className="bg-black-pure/90 border border-gold/30 lg:border-gold/40 p-6 sm:p-8 lg:p-10 shadow-xl shadow-black/70 relative">
+              {/* Upload & Card Edit Form Box */}
+              <div id="creation-form-box" className="bg-black-pure/90 border border-gold/30 lg:border-gold/40 p-3.5 sm:p-8 lg:p-10 shadow-xl shadow-black/70 relative">
+                {/* Editing Card Banner */}
+                {editingCardMeta && (
+                  <div className="mb-5 p-3.5 sm:p-4 bg-gradient-to-r from-gold/25 via-gold/15 to-transparent border border-gold/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-[0_0_20px_rgba(212,175,55,0.2)]">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-gold text-black-pure font-bold rounded-sm shrink-0">
+                        <Edit3 size={18} />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-mono uppercase tracking-widest text-gold font-bold block">
+                          Editing Card · {editingCardMeta.sectionLabel}
+                        </span>
+                        <h3 className="text-base sm:text-lg font-heading text-white font-bold leading-tight">
+                          "{editingCardMeta.title}"
+                        </h3>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCancelEditCard}
+                      className="self-start sm:self-auto px-4 py-2 border border-gold/50 hover:border-gold text-gold hover:text-white uppercase font-mono text-xs tracking-wider transition-all bg-black-pure/80 cursor-pointer"
+                    >
+                      Cancel Edit
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between mb-5 border-b border-gold/20 pb-4">
                   <div>
-                    <span className="text-[10px] font-mono text-gold uppercase tracking-widest">Content Management</span>
+                    <span className="text-[10px] font-mono text-gold uppercase tracking-widest">
+                      {editingCardMeta ? `Card Editor · ${editingCardMeta.sectionLabel}` : 'Content Management'}
+                    </span>
                     <h2 className="text-xl lg:text-2xl font-heading text-white uppercase tracking-wider flex items-center gap-2">
-                      Upload New Creation
+                      {editingCardMeta ? `Edit "${editingCardMeta.title}"` : 'Upload New Creation'}
                     </h2>
                   </div>
                 </div>
@@ -2811,7 +3620,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-6">
                     <div>
                       <label className="block text-xs uppercase tracking-wider text-gray-300 font-semibold mb-1.5">
-                        Creation Title *
+                        Card Title *
                       </label>
                       <input 
                         required 
@@ -2840,7 +3649,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                         {isCategoryOpen && (
                           <>
                             <div className="fixed inset-0 z-40" onClick={() => setIsCategoryOpen(false)}></div>
-                            <div className="absolute z-50 w-full mt-1 bg-black-pure border border-gold shadow-[0_8px_24px_rgba(0,0,0,0.9)]">
+                            <div className="absolute z-50 w-full mt-1 bg-black-pure border border-gold shadow-[0_8px_24px_rgba(0,0,0,0.9)] max-h-64 overflow-y-auto">
                               {CATEGORY_OPTIONS.map(opt => (
                                 <div 
                                   key={opt} 
@@ -2891,7 +3700,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
 
                   <div>
                     <label className="block text-xs uppercase tracking-wider text-gray-300 font-semibold mb-1">
-                      Project Description *
+                      Description *
                     </label>
                     <textarea 
                       required 
@@ -2905,7 +3714,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   {/* Image Selection - Supports Device Upload OR URL */}
                   <div>
                     <label className="block text-xs uppercase tracking-wider text-gray-300 font-semibold mb-2">
-                      Project Photo *
+                      Card Photo *
                     </label>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2965,26 +3774,23 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     >
                       {isUploading ? (
                         <>
-                          <RefreshCw size={16} className="animate-spin mr-2" /> Saving...
+                          <GoldSpinner size="xs" /> <span>Saving Creation...</span>
                         </>
                       ) : (
-                        <span>{editingProjectId ? 'Update Creation (Move to Top)' : 'Publish Creation to Website'}</span>
+                        <span>
+                          {editingCardMeta 
+                            ? `Update "${title || editingCardMeta.title}" & Publish Live` 
+                            : editingProjectId 
+                              ? 'Update Creation (Move to Top)' 
+                              : 'Publish Creation to Website'}
+                        </span>
                       )}
                     </button>
-                    {editingProjectId && (
+                    {(editingProjectId || editingCardMeta) && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setEditingProjectId(null);
-                          setTitle('');
-                          setDesc('');
-                          setImageUrl('');
-                          setImagePreview('');
-                          setCustomCategory('');
-                          const savedDefault = localStorage.getItem('natal_default_creation_category') || CATEGORY_OPTIONS[0];
-                          setCategory(savedDefault);
-                        }}
-                        className="w-full sm:w-auto px-5 py-3 border border-white/20 text-gray-400 hover:text-white uppercase text-xs tracking-wider text-center"
+                        onClick={handleCancelEditCard}
+                        className="w-full sm:w-auto px-5 py-3 border border-white/20 text-gray-400 hover:text-white uppercase text-xs tracking-wider text-center cursor-pointer transition-colors"
                       >
                         Cancel Edit
                       </button>
@@ -2993,64 +3799,141 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                 </form>
               </div>
 
-              {/* Existing Uploaded Projects Grid */}
+              {/* Universal Section Cards Browser & Direct Editor */}
               <div className="space-y-4">
-                <div className="flex items-center justify-between border-b border-gold/20 pb-2">
-                  <h3 className="text-lg font-heading text-white uppercase tracking-wider">
-                    Published Creations ({projects.length})
-                  </h3>
-                  <span className="text-xs font-mono text-gray-400">Live in Gallery</span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gold/20 pb-3 gap-2">
+                  <div>
+                    <span className="text-[10px] font-mono text-gold uppercase tracking-widest block">Direct Card & Content Editor</span>
+                    <h3 className="text-lg lg:text-xl font-heading text-white uppercase tracking-wider flex items-center gap-2">
+                      Section Cards ({visibleSectionCards.length})
+                    </h3>
+                  </div>
+                  <span className="text-xs text-gray-400 font-mono">
+                    Click <span className="text-gold font-bold">Edit</span> on any card to update its photo & details
+                  </span>
                 </div>
 
-                {projects.length === 0 ? (
+                {/* Section Filter Tabs */}
+                <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                  {[
+                    { id: 'showcase', label: 'Featured Interior Creations', count: allShowcaseCards.length, icon: Sparkles },
+                    { id: 'projects', label: 'Featured Projects', count: projectCards.length, icon: Building2 },
+                    { id: 'services', label: 'Our Services', count: serviceCards.length, icon: Paintbrush },
+                    { id: 'why_us', label: 'Why Choose Us', count: whyUsCards.length, icon: ShieldCheck },
+                    { id: 'process', label: 'The Process', count: processCards.length, icon: Layers },
+                    { id: 'hero', label: 'Hero Quick Cards', count: heroCards.length, icon: ImageIcon },
+                    { id: 'testimonials', label: 'Testimonials', count: testimonialCards.length, icon: MessageSquare },
+                    { id: 'custom', label: 'Custom Uploads', count: customUploadedCards.length, icon: Upload },
+                    { id: 'all', label: 'All Section Cards', count: allCombinedCards.length, icon: Sliders },
+                  ].map(tab => {
+                    const TabIcon = tab.icon;
+                    const isActive = selectedSectionFilter === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setSelectedSectionFilter(tab.id)}
+                        className={`flex items-center gap-2 px-3 sm:px-4 py-2 text-xs font-mono uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer rounded-none border shrink-0 ${
+                          isActive
+                            ? 'bg-gold text-black-pure border-gold font-bold shadow-[0_0_15px_rgba(212,175,55,0.4)]'
+                            : 'bg-black-rich text-gray-300 border-gold/30 hover:border-gold hover:text-white'
+                        }`}
+                      >
+                        <TabIcon size={13} className={isActive ? 'text-black-pure' : 'text-gold'} />
+                        <span>{tab.label}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold font-mono ${
+                          isActive ? 'bg-black-pure text-gold' : 'bg-white/10 text-gray-300'
+                        }`}>
+                          {tab.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Instant Search Bar */}
+                <div className="relative">
+                  <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input 
+                    value={cardSearchQuery}
+                    onChange={e => setCardSearchQuery(e.target.value)}
+                    placeholder="Filter cards by title, category, or description..."
+                    className="w-full bg-black-pure border border-gold/30 pl-10 pr-10 py-2.5 text-white text-xs placeholder:text-gray-500 focus:outline-none focus:border-gold"
+                  />
+                  {cardSearchQuery && (
+                    <button 
+                      type="button"
+                      onClick={() => setCardSearchQuery('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Cards Grid */}
+                {visibleSectionCards.length === 0 ? (
                   <div className="p-8 text-center bg-black-pure/50 border border-gold/20 text-gray-400 text-sm">
-                    No creations uploaded yet. Use the form above to add your first project!
+                    No cards matching the search query in this section.
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3.5 lg:gap-4">
-                    {projects.map((project, pIdx) => (
-                      <div key={project.id ? `${project.id}-${pIdx}` : `proj-${pIdx}`} className="bg-black-pure border border-gold/30 lg:border-gold/40 group relative overflow-hidden flex flex-col justify-between hover:border-gold transition-all duration-300 shadow-md hover:shadow-[0_12px_28px_rgba(0,0,0,0.8)] rounded-none">
-                        <div className="h-28 xs:h-32 sm:h-36 md:h-40 lg:h-32 xl:h-36 overflow-hidden relative">
+                    {visibleSectionCards.map((card, cIdx) => (
+                      <div 
+                        key={card.id ? `${card.id}-${cIdx}` : `card-${cIdx}`} 
+                        className={`bg-black-pure border ${
+                          editingCardMeta?.id === card.id 
+                            ? 'border-gold shadow-[0_0_20px_rgba(212,175,55,0.6)] ring-1 ring-gold' 
+                            : 'border-gold/30 lg:border-gold/40'
+                        } group relative overflow-hidden flex flex-col justify-between hover:border-gold transition-all duration-300 shadow-md hover:shadow-[0_12px_28px_rgba(0,0,0,0.8)] rounded-none`}
+                      >
+                        <div className="h-28 xs:h-32 sm:h-36 md:h-40 lg:h-32 xl:h-36 overflow-hidden relative bg-black-rich">
                           <img 
-                            src={project.image} 
-                            alt={project.title} 
+                            src={card.image} 
+                            alt={card.title} 
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black-pure via-transparent to-transparent opacity-60 pointer-events-none"></div>
                           
+                          {/* Section & Status Badges */}
+                          <div className="absolute top-1.5 left-1.5 z-20 flex flex-col gap-1 pointer-events-none">
+                            <span className="bg-black-pure/90 border border-gold/60 text-gold text-[7px] uppercase tracking-wider font-mono font-bold px-1.5 py-0.5">
+                              {card.sectionLabel || card.section}
+                            </span>
+                            {card.isEdited && (
+                              <span className="bg-amber-500 text-black-pure text-[7px] uppercase tracking-wider font-mono font-extrabold px-1.5 py-0.5 shadow-sm">
+                                Edited
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Quick Action Buttons */}
                           <div className="absolute top-1.5 right-1.5 z-20 flex items-center gap-1">
                             <button 
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setEditingProjectId(project.id);
-                                setTitle(project.title);
-                                setDesc(project.desc || project.description || '');
-                                setCategory(CATEGORY_OPTIONS.includes(project.category) ? project.category : 'Custom');
-                                if (!CATEGORY_OPTIONS.includes(project.category)) {
-                                  setCustomCategory(project.category);
-                                }
-                                setImageUrl(project.image);
-                                setImagePreview(project.image);
-                                window.scrollTo({ top: 120, behavior: 'smooth' });
+                                handleStartEditCard(card);
                               }}
-                              className="bg-black-pure/90 hover:bg-gold hover:text-black-pure text-gold p-1 sm:p-1.5 border border-gold/50 transition-all cursor-pointer shadow-md"
-                              title="Edit creation and bump to top"
+                              className="bg-black-pure/95 hover:bg-gold hover:text-black-pure text-gold p-1.5 border border-gold/60 transition-all cursor-pointer shadow-md"
+                              title="Edit this card"
                             >
-                              <Edit3 size={12} className="sm:hidden" />
-                              <Edit3 size={13} className="hidden sm:block" />
+                              <Edit3 size={13} />
                             </button>
                             <button 
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDeleteProject(project.id);
+                                handleDeleteOrResetCard(card);
                               }}
-                              className="bg-red-950/90 hover:bg-red-700 text-white p-1 sm:p-1.5 border border-red-500 transition-all cursor-pointer shadow-md"
-                              title="Delete this creation"
+                              className={`${
+                                card.isBase 
+                                  ? 'bg-neutral-900 hover:bg-neutral-700 text-amber-300 border border-amber-500/50' 
+                                  : 'bg-red-950/90 hover:bg-red-700 text-white border border-red-500'
+                              } p-1.5 transition-all cursor-pointer shadow-md`}
+                              title={card.isBase ? (card.isEdited ? 'Reset edits to default' : 'Revert') : 'Delete creation'}
                             >
-                              <Trash2 size={12} className="sm:hidden" />
-                              <Trash2 size={13} className="hidden sm:block" />
+                              {card.isBase ? <RotateCcw size={13} /> : <Trash2 size={13} />}
                             </button>
                           </div>
                         </div>
@@ -3058,17 +3941,22 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                         <div className="p-2 sm:p-2.5 lg:p-3 flex-1 flex flex-col justify-between">
                           <div>
                             <span className="text-gold text-[8px] sm:text-[9px] uppercase tracking-widest font-mono block mb-0.5 truncate">
-                              {project.category}
+                              {card.category}
                             </span>
-                            <h4 className="text-white font-medium text-xs line-clamp-1">{project.title}</h4>
-                            <p className="text-gray-400 text-[10px] line-clamp-2 mt-0.5">{project.desc}</p>
+                            <h4 className="text-white font-medium text-xs line-clamp-1">{card.title}</h4>
+                            <p className="text-gray-400 text-[10px] line-clamp-2 mt-0.5">{card.desc}</p>
                           </div>
 
                           <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-[9px] text-gray-400 font-mono">
-                            <span className="truncate">Active</span>
-                            <span className="text-gold flex items-center gap-1 shrink-0">
-                              <Eye size={10} className="sm:hidden" />
-                              <Eye size={11} className="hidden sm:block" /> Live
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditCard(card)}
+                              className="text-gold hover:text-white flex items-center gap-1 text-[10px] font-bold cursor-pointer"
+                            >
+                              <Edit3 size={10} /> Edit Card
+                            </button>
+                            <span className="text-emerald-400 flex items-center gap-1 shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Live
                             </span>
                           </div>
                         </div>
@@ -3078,7 +3966,8 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                 )}
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* TAB: SERVICES MANAGEMENT */}
           {activeTab === 'services' && (
@@ -3110,7 +3999,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
               )}
 
               {/* 1. SECTION HEADER CUSTOMIZATION ACCORDION / CARD */}
-              <div className="bg-black-pure/80 border border-gold/30 p-4 sm:p-6">
+              <div className="bg-black-pure/80 border border-gold/30 p-3.5 sm:p-6">
                 <div 
                   className="flex items-center justify-between cursor-pointer group gap-2 sm:gap-4"
                   onClick={() => setIsSectionHeaderOpen(!isSectionHeaderOpen)}
@@ -3215,7 +4104,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
               </div>
 
               {/* 2. SERVICE UPLOAD / EDIT FORM */}
-              <div id="service-edit-form" className="bg-black-pure/80 border border-gold/30 p-4 sm:p-8 relative">
+              <div id="service-edit-form" className="bg-black-pure/80 border border-gold/30 p-3.5 sm:p-8 relative">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 border-b border-gold/20 pb-3 gap-2">
                   <div>
                     <span className="text-[10px] font-mono text-gold uppercase tracking-widest">
@@ -3376,7 +4265,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     >
                       {isUploadingService ? (
                         <>
-                          <RefreshCw size={14} className="animate-spin" /> Saving Service...
+                          <GoldSpinner size="xs" /> <span>Saving Service...</span>
                         </>
                       ) : (
                         <>
@@ -3782,7 +4671,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
               </div>
 
               {/* Upload New Testimonial Form */}
-              <div className="bg-black-pure border border-gold/30 p-5 md:p-6 mb-8">
+              <div className="bg-black-pure border border-gold/30 p-3.5 sm:p-6 mb-8">
                 <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/10">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-white">Add New Testimonial</h3>
                 </div>
@@ -3790,12 +4679,36 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                 <form onSubmit={handleSaveTestimonial} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs uppercase tracking-wider text-gray-300 font-semibold mb-1">Client Name *</label>
-                      <input required type="text" value={tName} onChange={e => setTName(e.target.value)} placeholder="e.g. Robert Kasasa" className="w-full bg-black-rich border border-gold/30 px-3 py-2.5 text-white text-sm focus:outline-none focus:border-gold" />
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs uppercase tracking-wider text-gray-300 font-semibold">Client Name *</label>
+                      </div>
+                      <input 
+                        required 
+                        type="text" 
+                        value={tName} 
+                        onChange={e => setTName(sanitizeNameInput(e.target.value))} 
+                        onKeyDown={e => handleNameKeyDown(e)}
+                        onPaste={e => handleNamePaste(e, setTName)}
+                        inputMode="text"
+                        placeholder="e.g. Robert Kasasa" 
+                        className="w-full bg-black-rich border border-gold/30 px-3 py-2.5 text-white text-sm focus:outline-none focus:border-gold" 
+                      />
                     </div>
                     <div>
-                      <label className="block text-xs uppercase tracking-wider text-gray-300 font-semibold mb-1">Role / Title *</label>
-                      <input required type="text" value={tRole} onChange={e => setTRole(e.target.value)} placeholder="e.g. Home Owner" className="w-full bg-black-rich border border-gold/30 px-3 py-2.5 text-white text-sm focus:outline-none focus:border-gold" />
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs uppercase tracking-wider text-gray-300 font-semibold">Role / Title *</label>
+                      </div>
+                      <input 
+                        required 
+                        type="text" 
+                        value={tRole} 
+                        onChange={e => setTRole(sanitizeNameInput(e.target.value))} 
+                        onKeyDown={e => handleNameKeyDown(e)}
+                        onPaste={e => handleNamePaste(e, setTRole)}
+                        inputMode="text"
+                        placeholder="e.g. Home Owner" 
+                        className="w-full bg-black-rich border border-gold/30 px-3 py-2.5 text-white text-sm focus:outline-none focus:border-gold" 
+                      />
                     </div>
                   </div>
 
@@ -3862,8 +4775,15 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   </div>
 
                   <div className="pt-2 flex justify-end">
-                    <button type="submit" disabled={isUploadingTestimonial} className="bg-gold hover:bg-yellow-400 text-black-pure font-bold px-6 py-2.5 uppercase text-xs tracking-widest transition-all disabled:opacity-50">
-                      {isUploadingTestimonial ? 'Publishing...' : 'Publish Testimonial'}
+                    <button type="submit" disabled={isUploadingTestimonial} className="bg-gold hover:bg-yellow-400 text-black-pure font-bold px-6 py-2.5 uppercase text-xs tracking-widest transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2">
+                      {isUploadingTestimonial ? (
+                        <>
+                          <GoldSpinner size="xs" />
+                          <span>Publishing...</span>
+                        </>
+                      ) : (
+                        'Publish Testimonial'
+                      )}
                     </button>
                   </div>
                 </form>
@@ -3928,7 +4848,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
               </div>
 
               {/* Upload New Transformation Form */}
-              <div className="bg-black-pure border border-gold/30 p-5 md:p-6 mb-8">
+              <div className="bg-black-pure border border-gold/30 p-3.5 sm:p-6 mb-8">
                 <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/10">
                   <Plus size={18} className="text-gold" />
                   <h3 className="text-sm font-bold uppercase tracking-wider text-white">Add New Transformation</h3>
@@ -4083,23 +5003,41 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-mono text-gold uppercase tracking-widest">Executive Feeds</span>
-                    <span className="px-2 py-0.5 bg-red-500/20 text-red-300 border border-red-500/40 rounded-full text-[10px] font-mono font-bold animate-pulse">
-                      Live Stream
-                    </span>
+                    {unreadNotificationsCount > 0 ? (
+                      <span className="px-2.5 py-0.5 bg-red-600/25 text-red-300 border border-red-500/50 rounded-full text-[10px] font-mono font-bold flex items-center gap-1.5 animate-pulse">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                        <span>{unreadNotificationsCount} New Unread Alert{unreadNotificationsCount !== 1 ? 's' : ''}</span>
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full text-[10px] font-mono font-bold">
+                        All Caught Up
+                      </span>
+                    )}
                   </div>
                   <h2 className="text-xl sm:text-2xl font-heading text-white uppercase tracking-wider flex items-center gap-2.5 mt-1">
                     <Bell size={22} className="text-gold" /> System Notifications & Alerts
                   </h2>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
+                  {unreadNotificationsCount > 0 && (
+                    <button 
+                      onClick={handleMarkAllNotificationsRead}
+                      className="px-3 py-1.5 bg-red-950/70 hover:bg-red-900 border border-red-500/50 text-red-200 hover:text-white text-xs font-mono uppercase tracking-wider rounded transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                      title="Clear notification badges by marking all as read"
+                    >
+                      <Check size={13} />
+                      <span>Mark All as Read ({unreadNotificationsCount})</span>
+                    </button>
+                  )}
                   <button 
                     onClick={() => {
-                      setSuccessNotice('Notification stream refreshed with live data');
+                      setSuccessNotice('Notification stream refreshed with live database data');
                       setTimeout(() => setSuccessNotice(''), 3000);
                     }}
-                    className="px-3.5 py-1.5 bg-white/5 hover:bg-gold/10 border border-white/10 hover:border-gold/40 text-gray-300 hover:text-gold text-xs font-mono uppercase tracking-wider rounded transition-all cursor-pointer"
+                    className="px-3 py-1.5 bg-white/5 hover:bg-gold/10 border border-white/10 hover:border-gold/40 text-gray-300 hover:text-gold text-xs font-mono uppercase tracking-wider rounded transition-all cursor-pointer flex items-center gap-1.5"
                   >
-                    Refresh Stream
+                    <RefreshCw size={12} />
+                    <span>Refresh</span>
                   </button>
                 </div>
               </div>
@@ -4153,75 +5091,172 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
               </div>
 
               {/* Recent Activity Feed */}
-              <div className="bg-black-pure border border-gold/20 p-5 sm:p-6 rounded-sm shadow-lg">
-                <h3 className="text-sm font-heading uppercase tracking-widest text-gold mb-4 flex items-center gap-2">
-                  <Sparkles size={16} /> Latest System Alerts & Submissions
-                </h3>
-                <div className="divide-y divide-white/5 space-y-1">
-                  {users.slice(0, 5).map((userItem, idx) => (
-                    <div key={userItem.id || idx} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/5 px-2 rounded transition-colors">
-                      <div className="flex items-start gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gold/15 border border-gold/40 flex items-center justify-center shrink-0 mt-0.5">
-                          <UserCheck size={15} className="text-gold" />
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-white flex items-center gap-2">
-                            <span>{userItem.name}</span>
-                            <span className="text-[10px] font-mono px-2 py-0.5 bg-gold/10 text-gold border border-gold/30 rounded">
-                              {userItem.role || 'VIP Client'}
-                            </span>
-                          </div>
-                          <div className="text-xs text-gray-400 mt-0.5">
-                            {userItem.email} &bull; Source: <span className="text-gray-300 font-mono">{userItem.source || 'Quotation Form'}</span>
-                            {userItem.service && ` &bull; Project: ${userItem.service}`}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 sm:self-center">
-                        <button 
-                          onClick={() => switchTab('users')}
-                          className="px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider bg-gold/10 hover:bg-gold/25 border border-gold/30 text-gold rounded transition-colors cursor-pointer"
-                        >
-                          View in Users
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-
-                  {leads.slice(0, 5).map((leadItem, idx) => (
-                    <div key={leadItem.id || idx} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/5 px-2 rounded transition-colors">
-                      <div className="flex items-start gap-3">
-                        <div className="w-8 h-8 rounded-full bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center shrink-0 mt-0.5">
-                          <Mail size={15} className="text-emerald-400" />
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-white flex items-center gap-2">
-                            <span>{leadItem.name || 'Direct Lead'}</span>
-                            <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded">
-                              Direct Message
-                            </span>
-                          </div>
-                          <div className="text-xs text-gray-400 mt-0.5">
-                            {leadItem.email || leadItem.phone} &bull; <span className="italic">{leadItem.message ? `"${leadItem.message.slice(0, 50)}..."` : 'No message body'}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 sm:self-center">
-                        <button 
-                          onClick={() => switchTab('leads')}
-                          className="px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider bg-emerald-500/10 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 rounded transition-colors cursor-pointer"
-                        >
-                          View in CRM
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-
-                  {users.length === 0 && leads.length === 0 && (
-                    <div className="p-8 text-center text-gray-400 text-sm">
-                      No active alerts recorded yet. Submissions from quotation forms and user registrations will populate here in real-time.
-                    </div>
+              <div className="bg-black-pure border border-gold/20 p-3.5 sm:p-6 rounded-sm shadow-lg">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-heading uppercase tracking-widest text-gold flex items-center gap-2">
+                    <Sparkles size={16} /> Latest System Alerts & Submissions
+                  </h3>
+                  {unreadNotificationsCount > 0 && (
+                    <span className="text-[11px] font-mono text-red-400 font-bold">
+                      {unreadNotificationsCount} Unread Alert{unreadNotificationsCount !== 1 ? 's' : ''}
+                    </span>
                   )}
+                </div>
+                <div className="divide-y divide-white/5 space-y-1">
+                  {users.slice(0, 6).map((userItem, idx) => {
+                    const uId = userItem.id || `user_${userItem.email || idx}`;
+                    const isUnread = !readNotificationIds.includes(uId) && !userItem.isAdmin && !userItem.email?.toLowerCase().includes('admin');
+                    return (
+                      <div key={userItem.id || idx} className={`py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/5 px-2 rounded transition-colors ${isUnread ? 'bg-red-950/15 border-l-2 border-red-500 pl-3' : ''}`}>
+                        <div className="flex items-start gap-3">
+                          <div className={`w-8 h-8 rounded-full ${isUnread ? 'bg-red-500/20 border-red-500/60' : 'bg-gold/15 border-gold/40'} border flex items-center justify-center shrink-0 mt-0.5`}>
+                            <UserCheck size={15} className={isUnread ? 'text-red-400' : 'text-gold'} />
+                          </div>
+                          <div>
+                            <div className="text-sm font-semibold text-white flex items-center gap-2">
+                              <span>{userItem.name}</span>
+                              {isUnread && (
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 bg-red-600 text-white font-extrabold rounded shadow-sm animate-pulse">
+                                  NEW
+                                </span>
+                              )}
+                              <span className="text-[10px] font-mono px-2 py-0.5 bg-gold/10 text-gold border border-gold/30 rounded">
+                                {userItem.role || 'VIP Client'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-400 mt-0.5">
+                              {userItem.email} &bull; Source: <span className="text-gray-300 font-mono">{userItem.source || 'Quotation Form'}</span>
+                              {userItem.service && ` &bull; Project: ${userItem.service}`}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 sm:self-center">
+                          {isUnread && (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkSingleNotificationRead(uId)}
+                              className="px-2 py-1 text-[10px] font-mono uppercase bg-white/5 hover:bg-white/15 text-gray-300 border border-white/10 rounded transition-colors cursor-pointer"
+                              title="Mark this notification as read"
+                            >
+                              Mark Read
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => {
+                              handleMarkSingleNotificationRead(uId);
+                              switchTab('users');
+                            }}
+                            className="px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider bg-gold/10 hover:bg-gold/25 border border-gold/30 text-gold rounded transition-colors cursor-pointer"
+                          >
+                            View in Users
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {leads.slice(0, 6).map((leadItem, idx) => {
+                    const lId = leadItem.id || `lead_${leadItem.email || leadItem.phone || idx}`;
+                    const isUnread = !readNotificationIds.includes(lId);
+                    return (
+                      <div key={leadItem.id || idx} className={`py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/5 px-2 rounded transition-colors ${isUnread ? 'bg-red-950/15 border-l-2 border-red-500 pl-3' : ''}`}>
+                        <div className="flex items-start gap-3">
+                          <div className={`w-8 h-8 rounded-full ${isUnread ? 'bg-red-500/20 border-red-500/60' : 'bg-emerald-500/15 border-emerald-500/40'} border flex items-center justify-center shrink-0 mt-0.5`}>
+                            <Mail size={15} className={isUnread ? 'text-red-400' : 'text-emerald-400'} />
+                          </div>
+                          <div>
+                            <div className="text-sm font-semibold text-white flex items-center gap-2">
+                              <span>{leadItem.name || 'Direct Lead'}</span>
+                              {isUnread && (
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 bg-red-600 text-white font-extrabold rounded shadow-sm animate-pulse">
+                                  NEW
+                                </span>
+                              )}
+                              <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded">
+                                {leadItem.service || 'Direct Message'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-400 mt-0.5">
+                              {leadItem.email || leadItem.phone} &bull; <span className="italic">{leadItem.message ? `"${leadItem.message.slice(0, 50)}..."` : (leadItem.details ? `"${leadItem.details.slice(0, 50)}..."` : 'New consultation request')}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 sm:self-center">
+                          {isUnread && (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkSingleNotificationRead(lId)}
+                              className="px-2 py-1 text-[10px] font-mono uppercase bg-white/5 hover:bg-white/15 text-gray-300 border border-white/10 rounded transition-colors cursor-pointer"
+                              title="Mark this notification as read"
+                            >
+                              Mark Read
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => {
+                              handleMarkSingleNotificationRead(lId);
+                              switchTab('leads');
+                            }}
+                            className="px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider bg-emerald-500/10 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 rounded transition-colors cursor-pointer"
+                          >
+                            View in CRM
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {defaultSystemAlerts.map((sysAlert) => {
+                    const isUnread = !readNotificationIds.includes(sysAlert.id);
+                    return (
+                      <div key={sysAlert.id} className={`py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/5 px-2 rounded transition-colors ${isUnread ? 'bg-red-950/15 border-l-2 border-red-500 pl-3' : ''}`}>
+                        <div className="flex items-start gap-3">
+                          <div className={`w-8 h-8 rounded-full ${isUnread ? 'bg-red-500/20 border-red-500/60' : 'bg-gold/15 border-gold/40'} border flex items-center justify-center shrink-0 mt-0.5`}>
+                            <Sparkles size={15} className={isUnread ? 'text-red-400' : 'text-gold'} />
+                          </div>
+                          <div>
+                            <div className="text-sm font-semibold text-white flex items-center gap-2">
+                              <span>{sysAlert.title}</span>
+                              {isUnread && (
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 bg-red-600 text-white font-extrabold rounded shadow-sm animate-pulse">
+                                  NEW
+                                </span>
+                              )}
+                              <span className="text-[10px] font-mono px-2 py-0.5 bg-gold/10 text-gold border border-gold/30 rounded">
+                                {sysAlert.name}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-400 mt-0.5">
+                              {sysAlert.details || sysAlert.service} &bull; Source: <span className="text-gray-300 font-mono">{sysAlert.source}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 sm:self-center">
+                          {isUnread && (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkSingleNotificationRead(sysAlert.id)}
+                              className="px-2 py-1 text-[10px] font-mono uppercase bg-white/5 hover:bg-white/15 text-gray-300 border border-white/10 rounded transition-colors cursor-pointer"
+                              title="Mark this notification as read"
+                            >
+                              Mark Read
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => {
+                              handleMarkSingleNotificationRead(sysAlert.id);
+                              if (sysAlert.type === 'lead') switchTab('leads');
+                              else if (sysAlert.type === 'user') switchTab('users');
+                              else switchTab('profile');
+                            }}
+                            className="px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider bg-gold/10 hover:bg-gold/25 border border-gold/30 text-gold rounded transition-colors cursor-pointer"
+                          >
+                            Details
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -4243,7 +5278,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                 </div>
               )}
 
-              <div className="bg-black-pure border border-gold/30 p-6 space-y-4">
+              <div className="bg-black-pure border border-gold/30 p-3.5 sm:p-6 space-y-4">
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-xs text-gray-400 block">Current Active Master Passcode:</span>
@@ -4290,6 +5325,160 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   </button>
                 </form>
               </div>
+
+              {/* Connected Email Service Hub */}
+              <div className="bg-black-pure border border-gold/30 p-3.5 sm:p-6 space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-white/10">
+                  <div>
+                    <span className="text-[10px] font-mono text-gold uppercase tracking-widest block mb-0.5">Live Integration</span>
+                    <h3 className="text-base font-heading text-white uppercase tracking-wider flex items-center gap-2">
+                      <Mail size={16} className="text-gold" /> Connected Email Service
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-500/50 px-3 py-1 rounded-sm w-fit">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="font-bold uppercase tracking-wider">Service Connected &amp; Active</span>
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-300 leading-relaxed">
+                  This website is connected to the real-time email dispatch service. All incoming client submissions across the <strong>Contact Us Form</strong>, <strong>Quotation Request Form</strong>, and <strong>VIP Client Registrations</strong> are automatically compiled and delivered directly to your email inbox with direct WhatsApp response links.
+                </p>
+
+                {/* Email Service Configuration Form */}
+                <form onSubmit={handleSaveEmailConfig} className="space-y-4 bg-black-rich border border-gold/20 p-4 rounded-sm">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-mono uppercase tracking-wider text-gray-300 font-semibold mb-1.5 flex items-center gap-1.5">
+                        <Mail size={13} className="text-gold" />
+                        <span>Recipient Email Address *</span>
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={emailConfig.recipientEmail}
+                        onChange={(e) => setEmailConfig({ ...emailConfig, recipientEmail: e.target.value })}
+                        placeholder="mukisavicent7777@gmail.com"
+                        className="w-full bg-black-pure border border-white/20 focus:border-gold px-3.5 py-2 text-white text-xs font-mono focus:outline-none transition-colors"
+                      />
+                      <span className="text-[10px] text-gray-400 font-mono mt-1 block">
+                        All website inquiries and quotation briefs will be delivered here.
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-mono uppercase tracking-wider text-gray-300 font-semibold mb-1.5">
+                        Dispatch Protocol
+                      </label>
+                      <select
+                        value={emailConfig.provider}
+                        onChange={(e) => setEmailConfig({ ...emailConfig, provider: e.target.value as any })}
+                        className="w-full bg-black-pure border border-white/20 focus:border-gold px-3.5 py-2 text-white text-xs focus:outline-none transition-colors"
+                      >
+                        <option value="formsubmit">Direct Inbox Gateway (FormSubmit AJAX - No Server Needed)</option>
+                        <option value="firestore_mail">Firestore Mail Collection (Firebase Extension)</option>
+                      </select>
+                      <span className="text-[10px] text-gray-400 font-mono mt-1 block">
+                        Dual dispatch: delivers to inbox and logs in Firestore audit queue.
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-white/10">
+                    <button
+                      type="submit"
+                      className="bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold px-5 py-2 uppercase text-xs tracking-wider transition-all cursor-pointer rounded-sm shadow-md"
+                    >
+                      Save Email Preferences
+                    </button>
+                    {emailConfigSaved && (
+                      <span className="text-xs font-mono text-emerald-400 flex items-center gap-1.5">
+                        <CheckCircle size={14} /> {emailConfigSaved}
+                      </span>
+                    )}
+                  </div>
+                </form>
+
+                {/* Real-time Status Card */}
+                <div className="p-3 bg-black-rich border border-white/10 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Current Destination:</span>
+                    <span className="text-white font-mono font-semibold">{emailConfig.recipientEmail}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Watched Collections:</span>
+                    <span className="text-gold font-mono font-semibold">mail &bull; leads</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Instant Delivery:</span>
+                    <span className="text-emerald-400 font-mono flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      Active &amp; Listening for Submissions
+                    </span>
+                  </div>
+                </div>
+
+                {mailNotice && (
+                  <div className="p-3 bg-emerald-950/80 border border-emerald-500/60 text-emerald-200 text-xs flex items-center gap-2">
+                    <CheckCircle size={15} className="text-emerald-400 shrink-0" />
+                    <span>{mailNotice}</span>
+                  </div>
+                )}
+
+                <div className="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSendTestMail}
+                    disabled={isSendingTestMail}
+                    className="bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold px-5 py-2.5 uppercase text-xs tracking-wider transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 rounded-sm shadow-md"
+                  >
+                    {isSendingTestMail ? (
+                      <>
+                        <GoldSpinner size="xs" />
+                        <span>Dispatching Test Email...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Mail size={14} />
+                        <span>Send Test Email to {emailConfig.recipientEmail}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Quick Activation Note */}
+                <div className="pt-3 border-t border-white/10 text-[11px] text-gray-300 space-y-2.5">
+                  <span className="font-semibold text-gold uppercase tracking-wider block text-xs">
+                    How Email Dispatch &amp; Testing Works:
+                  </span>
+                  <div className="bg-black-rich border border-gold/20 p-3.5 space-y-2 text-xs">
+                    <p className="flex items-start gap-2">
+                      <span className="text-gold font-bold shrink-0">Step 1:</span>
+                      <span>
+                        <strong>Recipient Inbox:</strong> Website leads (Quotations, Contact Inquiries, VIP registrations) are dispatched to the <strong>Recipient Email</strong> configured above (<code className="text-gold">{emailConfig.recipientEmail}</code>). If you want leads sent to your personal inbox, update the field above and click <em>Save Email Preferences</em>.
+                      </span>
+                    </p>
+                    <p className="flex items-start gap-2">
+                      <span className="text-gold font-bold shrink-0">Step 2:</span>
+                      <span>
+                        <strong>One-Time Activation Requirement:</strong> When an email address receives its first submission through FormSubmit, an activation email titled <em>"Action Required: Activate FormSubmit"</em> is sent to that address. <strong>You must open that email and click "Activate Form"</strong> once. Until clicked, FormSubmit holds submissions to prevent spam.
+                      </span>
+                    </p>
+                    <p className="flex items-start gap-2">
+                      <span className="text-gold font-bold shrink-0">Step 3:</span>
+                      <span>
+                        <strong>Check Spam / Junk Folder:</strong> If you test and don't immediately see the email in your Primary inbox, always check your <strong>Spam / Junk</strong> folder or the <strong>Promotions</strong> tab. Mark it as "Not Spam" to receive future leads directly into your inbox.
+                      </span>
+                    </p>
+                    <p className="flex items-start gap-2">
+                      <span className="text-gold font-bold shrink-0">Step 4:</span>
+                      <span>
+                        <strong>Client Auto-Confirmation:</strong> When a client fills their email in the Quotation Form, an automated confirmation receipt is also delivered to the client's inbox thanking them for reaching out to Natal Interior Design.
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -4302,13 +5491,13 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     <User size={20} className="text-gold" /> Admin Profile
                   </h2>
                 </div>
-                <div className="flex items-center gap-2 text-xs font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 px-3 py-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>Nav Bar & Suite Synchronized</span>
+                <div className="flex items-center gap-2 text-xs font-mono text-emerald-400 bg-emerald-950/70 border border-emerald-500/50 px-3 py-1 rounded-full shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
+                  <span className="font-bold uppercase tracking-wider">Owner Live Now</span>
                 </div>
               </div>
 
-              <div className="bg-black-pure border border-gold/30 p-6 md:p-8">
+              <div className="bg-black-pure border border-gold/30 p-3.5 sm:p-6 md:p-8">
                 <div className="flex flex-col md:flex-row items-center md:items-start gap-8">
                   
                   {/* Avatar Area - Synchronized with Nav Bar */}
@@ -4328,10 +5517,11 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                           <span className="text-[10px] font-mono uppercase tracking-widest mt-1 text-gold/70">Admin</span>
                         </div>
                       )}
-                      <div className="absolute bottom-2 right-2 flex items-center gap-1.5 px-2.5 py-1 bg-emerald-950/85 border border-emerald-500/50 rounded-full shadow-lg backdrop-blur-sm z-10">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                        <span className="text-emerald-400 font-mono text-[9px] uppercase tracking-widest font-bold">Online</span>
-                      </div>
+                      {/* Circular Live Dot on top of Profile */}
+                      <span className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center z-10 pointer-events-none" title="Owner Live">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-black-pure shadow-[0_0_10px_rgba(16,185,129,0.9)]"></span>
+                      </span>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -4380,7 +5570,11 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                               <input 
                                 type="text"
                                 value={adminNameInput}
-                                onChange={(e) => setAdminNameInput(e.target.value)}
+                                onChange={(e) => setAdminNameInput(sanitizeNameInput(e.target.value))}
+                                onKeyDown={(e) => handleNameKeyDown(e)}
+                                onPaste={(e) => handleNamePaste(e, setAdminNameInput)}
+                                inputMode="text"
+                                autoComplete="name"
                                 placeholder="Admin name"
                                 className="bg-black-rich border border-gold/50 px-2.5 py-1 text-white text-xs w-full focus:outline-none focus:border-gold"
                                 autoFocus

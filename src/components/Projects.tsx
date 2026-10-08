@@ -5,6 +5,7 @@ import { Project } from '../types';
 import { ArrowRight, Sparkles, CheckCircle2, SlidersHorizontal, ArrowUpRight } from 'lucide-react';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
+import { ProjectCardSkeleton } from './SkeletonLoader';
 
 function ProjectCard({ project, isShowingBefore, onToggleBeforeAfter, onSpecsClick, isLatest }: any) {
   return (
@@ -131,6 +132,7 @@ interface ProjectsProps {
 
 export default function Projects({ onViewProjectSpecs }: ProjectsProps = {}) {
   const [uploadedProjects, setUploadedProjects] = useState<Project[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [activeBeforeAfterId, setActiveBeforeAfterId] = useState<string | null>(null);
 
@@ -190,6 +192,7 @@ export default function Projects({ onViewProjectSpecs }: ProjectsProps = {}) {
         });
 
         setUploadedProjects(uniqueCombined);
+        setIsLoadingProjects(false);
       }, (err) => {
         console.warn("Firestore projects load fallback:", err);
         const localData = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
@@ -209,6 +212,7 @@ export default function Projects({ onViewProjectSpecs }: ProjectsProps = {}) {
           beforeImage: lp.beforeImage || undefined,
           servicesUsed: lp.tags || [lp.category, 'Natal Creation']
         })));
+        setIsLoadingProjects(false);
       });
     } catch (e) {
       console.warn("Firestore error in Projects:", e);
@@ -229,13 +233,27 @@ export default function Projects({ onViewProjectSpecs }: ProjectsProps = {}) {
         beforeImage: lp.beforeImage || undefined,
         servicesUsed: lp.tags || [lp.category, 'Natal Creation']
       })));
+      setIsLoadingProjects(false);
     }
     return () => unsubscribe();
   }, []);
 
   // Place uploaded/updated projects strictly at the top of the list without duplicate IDs
   const seenAll = new Set<string>();
-  const allProjects = [...uploadedProjects, ...projectsData].filter((p, idx) => {
+  const overriddenProjects = new Set<string>();
+
+  uploadedProjects.forEach((p: any) => {
+    if (p.originalId) overriddenProjects.add(p.originalId.toLowerCase());
+    if (p.originalTitle) overriddenProjects.add(p.originalTitle.trim().toLowerCase());
+    if (p.id) overriddenProjects.add(p.id.toLowerCase());
+    if (p.title) overriddenProjects.add(p.title.trim().toLowerCase());
+  });
+
+  const filteredBaseProjects = projectsData.filter(bp => {
+    return !overriddenProjects.has(bp.id.toLowerCase()) && !overriddenProjects.has(bp.title.trim().toLowerCase());
+  });
+
+  const allProjects = [...uploadedProjects, ...filteredBaseProjects].filter((p, idx) => {
     const k = p.id || `proj-${idx}`;
     if (seenAll.has(k)) return false;
     seenAll.add(k);
@@ -325,26 +343,30 @@ export default function Projects({ onViewProjectSpecs }: ProjectsProps = {}) {
 
         {/* Responsive Projects Grid: 2 columns on mobile (4 full rows = 8 items), 3 on tablet (3 full rows = 9 items), 6 on laptop (2 full rows = 12 items) with generous in-between space */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-3.5 sm:gap-x-5 lg:gap-x-6 xl:gap-x-8 gap-y-3.5 sm:gap-y-4 lg:gap-y-5">
-          {filteredProjects.slice(0, 12).map((project, index) => {
-            const isShowingBefore = activeBeforeAfterId === project.id && project.beforeImage;
-            return (
-              <motion.div
-                key={project.id ? `${project.id}-${index}` : `proj-${index}`}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.3 }}
-                className={`h-full flex flex-col ${index === 8 ? 'hidden sm:flex' : index >= 9 ? 'hidden lg:flex' : ''}`}
-              >
-                <ProjectCard 
-                  project={project} 
-                  isShowingBefore={isShowingBefore} 
-                  onToggleBeforeAfter={() => setActiveBeforeAfterId(isShowingBefore ? null : project.id)}
-                  onSpecsClick={() => handleOpenSpecs(project)}
-                  isLatest={index === 0 && uploadedProjects.length > 0}
-                />
-              </motion.div>
-            );
-          })}
+          {isLoadingProjects ? (
+            <ProjectCardSkeleton count={6} />
+          ) : (
+            filteredProjects.slice(0, 12).map((project, index) => {
+              const isShowingBefore = activeBeforeAfterId === project.id && project.beforeImage;
+              return (
+                <motion.div
+                  key={project.id ? `${project.id}-${index}` : `proj-${index}`}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.3 }}
+                  className={`h-full flex flex-col ${index === 8 ? 'hidden sm:flex' : index >= 9 ? 'hidden lg:flex' : ''}`}
+                >
+                  <ProjectCard 
+                    project={project} 
+                    isShowingBefore={isShowingBefore} 
+                    onToggleBeforeAfter={() => setActiveBeforeAfterId(isShowingBefore ? null : project.id)}
+                    onSpecsClick={() => handleOpenSpecs(project)}
+                    isLatest={index === 0 && uploadedProjects.length > 0}
+                  />
+                </motion.div>
+              );
+            })
+          )}
         </div>
 
         {/* Bottom CTA to Full Portfolio Page */}

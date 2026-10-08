@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
+import { CardSkeleton } from './SkeletonLoader';
 import { servicesData, cardHighlights, companyDetails } from '../data';
 import { Service } from '../types';
 
@@ -228,6 +229,7 @@ export default function ServicesPage({ onNavigateHome }: ServicesPageProps) {
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [uploadedServices, setUploadedServices] = useState<Service[]>([]);
+  const [isLoadingServices, setIsLoadingServices] = useState(true);
   const [selectedService, setSelectedService] = useState<any | null>(null);
 
   // Sync with Firestore services collection
@@ -275,15 +277,18 @@ export default function ServicesPage({ onNavigateHome }: ServicesPageProps) {
         });
 
         setUploadedServices(uniqueCombined);
+        setIsLoadingServices(false);
       }, (err) => {
         console.warn("ServicesPage firestore listener fallback:", err);
         const localServices = JSON.parse(localStorage.getItem('natal_local_services') || '[]');
         setUploadedServices(localServices);
+        setIsLoadingServices(false);
       });
     } catch (e) {
       console.warn("Error setting up services listener:", e);
       const localServices = JSON.parse(localStorage.getItem('natal_local_services') || '[]');
       setUploadedServices(localServices);
+      setIsLoadingServices(false);
     }
     return () => unsubscribe();
   }, []);
@@ -458,8 +463,11 @@ export default function ServicesPage({ onNavigateHome }: ServicesPageProps) {
 
         {/* Services Grid (2 Columns on mobile, 3 on tablet, 6 on laptop/desktop with generous in-between space) */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-3.5 sm:gap-x-5 lg:gap-x-6 xl:gap-x-8 gap-y-6 sm:gap-y-8 lg:gap-y-10">
-          <AnimatePresence>
-            {filteredServices.map((service, idx) => {
+          {isLoadingServices ? (
+            <CardSkeleton count={6} height="h-64" />
+          ) : (
+            <AnimatePresence>
+              {filteredServices.map((service, idx) => {
               const IconComponent = getIcon(service.icon, idx);
               return (
                 <motion.div
@@ -527,6 +535,7 @@ export default function ServicesPage({ onNavigateHome }: ServicesPageProps) {
               );
             })}
           </AnimatePresence>
+        )}
         </div>
 
         {filteredServices.length === 0 && (

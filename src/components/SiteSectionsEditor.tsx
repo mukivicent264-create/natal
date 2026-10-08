@@ -107,7 +107,7 @@ export const SiteSectionsEditor: React.FC = () => {
       </div>
 
       {/* Main Content Workspace Card */}
-      <div className="bg-neutral-950/90 border border-gold/20 p-6 sm:p-8 rounded-lg shadow-xl">
+      <div className="bg-neutral-950/90 border border-gold/20 p-3.5 sm:p-8 rounded-lg shadow-xl">
         {activeSection === 'branding' && <BrandingSectionEditor onNotify={showNotification} />}
         {activeSection === 'hero' && <HeroSectionEditor onNotify={showNotification} />}
         {activeSection === 'about' && <AboutSectionEditor onNotify={showNotification} />}
@@ -774,8 +774,13 @@ const HeroSectionEditor: React.FC<{ onNotify: (msg: string) => void }> = ({ onNo
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    await updateContent(formData);
-    onNotify('Hero section content published live.');
+    try {
+      await updateContent(formData);
+      onNotify('Hero section content published live.');
+    } catch (err: any) {
+      console.error('Hero section publish error:', err);
+      alert('Could not publish hero section: ' + (err?.message || 'Document limit error'));
+    }
   };
 
   const handleReset = async () => {
@@ -919,16 +924,16 @@ const HeroSectionEditor: React.FC<{ onNotify: (msg: string) => void }> = ({ onNo
   const handleCardFileUpload = async (idx: number, file: File) => {
     setCardCompressingIdx(idx);
     try {
-      const compressed = await compressImageFile(file, 960, 640, 0.82);
+      const compressed = await compressImageFile(file, 450, 320, 0.70);
       const nextCards = [...formData.cards];
       nextCards[idx] = { ...nextCards[idx], img: compressed };
       const next = { ...formData, cards: nextCards };
       setFormData(next);
       await updateContent(next);
       onNotify(`Hero card #${idx + 1} updated.`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Card image compression error:', err);
-      alert('Could not process this image file.');
+      alert('Could not process this image file: ' + (err?.message || 'Storage error'));
     } finally {
       setCardCompressingIdx(null);
     }
@@ -1221,6 +1226,8 @@ const HeroSectionEditor: React.FC<{ onNotify: (msg: string) => void }> = ({ onNo
                 label="Fallback Poster Image (Shown while video loads)"
                 value={formData.backgroundImage}
                 onChange={handleBackgroundChange}
+                maxWidth={1280}
+                maxHeight={800}
               />
             </div>
           </div>
@@ -1229,6 +1236,8 @@ const HeroSectionEditor: React.FC<{ onNotify: (msg: string) => void }> = ({ onNo
             label="Hero Background Photograph"
             value={formData.backgroundImage}
             onChange={handleBackgroundChange}
+            maxWidth={1280}
+            maxHeight={800}
           />
         )}
       </div>

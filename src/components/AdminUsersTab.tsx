@@ -7,7 +7,21 @@ import {
   Zap, Clock, Activity, MessageSquare, PlusCircle, ExternalLink,
   History, ArrowRight, CornerDownRight, Tag, Layers, Camera, Edit2, Edit3, Save
 } from 'lucide-react';
-import { recordUserActivity, UserActivity, getUserInitials, compressImageFile } from '../utils';
+import { 
+  recordUserActivity, 
+  UserActivity, 
+  getUserInitials, 
+  compressImageFile,
+  sanitizeNameInput,
+  isValidName,
+  sanitizePhoneInput,
+  isValidPhone,
+  handleNameKeyDown,
+  handleNamePaste,
+  handlePhoneKeyDown,
+  handlePhonePaste,
+  CONTAINS_DIGITS_OR_SYMBOLS_REGEX
+} from '../utils';
 
 const SOURCE_FILTER_OPTIONS = [
   { value: 'all', label: 'All Channels' },
@@ -102,8 +116,10 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
   const userPhotoInputRef = React.useRef<HTMLInputElement>(null);
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [editName, setEditName] = useState('');
+  const [editNameError, setEditNameError] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [editPhoneError, setEditPhoneError] = useState('');
   const [editRole, setEditRole] = useState<'Administrator' | 'VIP Client' | 'Client Lead' | 'Registered Member'>('Client Lead');
   const [editService, setEditService] = useState('');
   const [editStatus, setEditStatus] = useState('');
@@ -173,6 +189,17 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
   const handleSaveUserEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUserDetail || !editName.trim()) return;
+
+    if (!isValidName(editName)) {
+      setUserModalNotice("⚠ Error: Name must contain letters only (no numbers, digits or symbols).");
+      return;
+    }
+
+    if (editPhone.trim() && !isValidPhone(editPhone)) {
+      setUserModalNotice("⚠ Error: Please enter a valid phone number (at least 7 digits).");
+      return;
+    }
+
     setIsSavingUserEdit(true);
     try {
       const isAdm = editRole === 'Administrator';
@@ -202,8 +229,10 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
   // Manual Add Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [name, setName] = useState('');
+  const [nameError, setNameError] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [phoneError, setPhoneError] = useState('');
   const [source, setSource] = useState<'Registration' | 'Quotation Form' | 'Contact Form'>('Registration');
   const [role, setRole] = useState<'Administrator' | 'VIP Client' | 'Client Lead' | 'Registered Member'>('VIP Client');
   const [isModalSourceOpen, setIsModalSourceOpen] = useState(false);
@@ -264,6 +293,16 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
   const handleSubmitNewUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !email.trim()) return;
+
+    if (!isValidName(name)) {
+      alert("Error: Client name must contain letters only (no numbers, digits or symbols).");
+      return;
+    }
+
+    if (phone.trim() && !isValidPhone(phone)) {
+      alert("Error: Please enter a valid phone number (at least 7 digits).");
+      return;
+    }
 
     setIsSubmitting(true);
     const isVIPAccount = role === 'VIP Client';
@@ -575,7 +614,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
       {/* KPI Metric Cards in responsive 5-column layout */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
         {/* Card 1: Total Directory */}
-        <div className="bg-black-pure border border-gold/30 hover:border-gold/60 p-4 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
+        <div className="bg-black-pure border border-gold/30 hover:border-gold/60 p-3 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
           <div>
             <div className="flex items-center justify-between text-gray-400 text-[10px] sm:text-[11px] font-mono uppercase tracking-wider">
               <span className="truncate pr-1 font-medium text-gray-300">Total Directory</span>
@@ -607,7 +646,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
         </div>
 
         {/* Card 2: Recorded User Activities */}
-        <div className="bg-black-pure border border-amber-400/40 hover:border-amber-400/80 p-4 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
+        <div className="bg-black-pure border border-amber-400/40 hover:border-amber-400/80 p-3 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
           <div>
             <div className="flex items-center justify-between text-gray-400 text-[10px] sm:text-[11px] font-mono uppercase tracking-wider">
               <span className="truncate pr-1 font-medium text-gray-300">User Activities</span>
@@ -631,7 +670,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
         </div>
 
         {/* Card 3: VIP Registrations */}
-        <div className="bg-black-pure border border-white/10 hover:border-amber-400/40 p-4 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
+        <div className="bg-black-pure border border-white/10 hover:border-amber-400/40 p-3 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
           <div>
             <div className="flex items-center justify-between text-gray-400 text-[10px] sm:text-[11px] font-mono uppercase tracking-wider">
               <span className="truncate pr-1 font-medium text-gray-300">VIP Accounts</span>
@@ -655,7 +694,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
         </div>
 
         {/* Card 4: Quotation Forms */}
-        <div className="bg-black-pure border border-white/10 hover:border-emerald-400/40 p-4 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
+        <div className="bg-black-pure border border-white/10 hover:border-emerald-400/40 p-3 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
           <div>
             <div className="flex items-center justify-between text-gray-400 text-[10px] sm:text-[11px] font-mono uppercase tracking-wider">
               <span className="truncate pr-1 font-medium text-gray-300">Scope Quotes</span>
@@ -679,7 +718,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
         </div>
 
         {/* Card 5: Contact Forms / Inquiries */}
-        <div className="bg-black-pure border border-white/10 hover:border-blue-400/40 p-4 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
+        <div className="bg-black-pure border border-white/10 hover:border-blue-400/40 p-3 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
           <div>
             <div className="flex items-center justify-between text-gray-400 text-[10px] sm:text-[11px] font-mono uppercase tracking-wider">
               <span className="truncate pr-1 font-medium text-gray-300">Direct Messages</span>
@@ -704,7 +743,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
       </div>
 
       {/* Control Bar: Search, Filter Tabs, Sort Option, View Switcher */}
-      <div className="bg-black-pure border border-gold/30 p-4 sm:p-5 space-y-4 shadow-xl">
+      <div className="bg-black-pure border border-gold/30 p-3 sm:p-5 space-y-4 shadow-xl">
         <div className="flex flex-col lg:flex-row gap-3.5 items-stretch lg:items-center justify-between">
           {/* Search Field Matching Website Signature Design */}
           <div className="relative flex-1 min-w-[280px]">
@@ -961,7 +1000,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               <div 
                 key={u.id || u.email || `usr_list_${uIdx}`}
                 onClick={() => handleOpenUserDetail(u)}
-                className="bg-black-pure border border-gold/30 hover:border-gold transition-all duration-200 p-4 sm:p-5 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4 group shadow-md hover:shadow-[0_10px_30px_rgba(0,0,0,0.85)] relative overflow-hidden cursor-pointer"
+                className="bg-black-pure border border-gold/30 hover:border-gold transition-all duration-200 p-3 sm:p-5 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4 group shadow-md hover:shadow-[0_10px_30px_rgba(0,0,0,0.85)] relative overflow-hidden cursor-pointer"
               >
                 {/* Left accent strip */}
                 <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${
@@ -1169,12 +1208,19 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                     {/* Name */}
                     <td className="py-3.5 px-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gold/10 border border-gold/30 text-gold font-bold font-serif flex items-center justify-center text-xs shrink-0 overflow-hidden">
-                          {u.photoURL ? (
-                            <img src={u.photoURL} alt={u.name} className="w-full h-full object-cover" />
-                          ) : (
-                            <span>{initials || 'VIP'}</span>
-                          )}
+                        <div className="relative shrink-0">
+                          <div className="w-8 h-8 rounded-full bg-gold/10 border border-gold/30 text-gold font-bold font-serif flex items-center justify-center text-xs overflow-hidden">
+                            {u.photoURL ? (
+                              <img src={u.photoURL} alt={u.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <span>{initials || 'VIP'}</span>
+                            )}
+                          </div>
+                          {/* Circular Live Dot on top of profile avatar */}
+                          <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center pointer-events-none">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500 border border-black-pure shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span>
+                          </span>
                         </div>
                         <div>
                           <span className="font-semibold text-white group-hover:text-gold transition-colors block">
@@ -1205,9 +1251,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                           </span>
                         </span>
                         <div className="text-[10px] font-mono text-gray-400 flex items-center gap-1">
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            (u.role === 'Administrator' || (u.email && u.email.toLowerCase().includes('admin'))) ? 'bg-purple-400 animate-pulse' : 'bg-emerald-400'
-                          }`}></span>
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                           <span>{u.status || ((u.role === 'Administrator' || (u.email && u.email.toLowerCase().includes('admin'))) ? 'Active Administrator' : 'Active')}</span>
                         </div>
                       </div>
@@ -1339,11 +1383,16 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                       <span>{getUserInitials(selectedUserDetail.name, selectedUserDetail.email) || (selectedUserDetail.name || 'U')[0].toUpperCase()}</span>
                     )}
                   </div>
+                  {/* Circular Live Dot on top of avatar */}
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center pointer-events-none" title="Live Profile">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
+                  </span>
                   {/* Photo upload trigger button */}
                   <button
                     type="button"
                     onClick={() => userPhotoInputRef.current?.click()}
-                    className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-gold text-black-pure shadow-md hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                    className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-gold text-black-pure shadow-md hover:scale-110 active:scale-95 transition-all cursor-pointer z-10"
                     title="Change / Upload Photo"
                   >
                     <Camera size={12} />
@@ -1384,17 +1433,9 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                     <span className="text-[10px] font-mono text-gray-300 bg-white/5 px-2.5 py-0.5 rounded border border-white/15">
                       Source: {selectedUserDetail.source || 'Registration'}
                     </span>
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border flex items-center gap-1 ${
-                      selectedUserDetail.role === 'Administrator' || (selectedUserDetail.email && selectedUserDetail.email.toLowerCase().includes('admin'))
-                        ? 'text-purple-300 bg-purple-950/50 border-purple-500/30'
-                        : 'text-emerald-400 bg-emerald-950/50 border-emerald-500/30'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        selectedUserDetail.role === 'Administrator' || (selectedUserDetail.email && selectedUserDetail.email.toLowerCase().includes('admin'))
-                          ? 'bg-purple-400 animate-pulse'
-                          : 'bg-emerald-400'
-                      }`}></span>
-                      {selectedUserDetail.status || ((selectedUserDetail.role === 'Administrator' || (selectedUserDetail.email && selectedUserDetail.email.toLowerCase().includes('admin'))) ? 'Active Administrator' : 'Active')}
+                    <span className="text-[10px] font-mono px-2.5 py-0.5 rounded border border-emerald-500/30 text-emerald-400 bg-emerald-950/50 flex items-center gap-1.5 font-medium">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                      <span>{selectedUserDetail.status || ((selectedUserDetail.role === 'Administrator' || (selectedUserDetail.email && selectedUserDetail.email.toLowerCase().includes('admin'))) ? 'Active Administrator' : 'Active')}</span>
                     </span>
                   </div>
                 </div>
@@ -1453,14 +1494,34 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div>
-                    <label className="block text-[10px] font-mono uppercase text-gray-400 mb-1">Full Name *</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[10px] font-mono uppercase text-gray-400">Full Name *</label>
+                    </div>
                     <input 
                       type="text" 
                       required 
                       value={editName} 
-                      onChange={(e) => setEditName(e.target.value)} 
-                      className="w-full bg-black-pure border border-gold/30 focus:border-gold px-3 py-2 text-white text-xs focus:outline-none"
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        const clean = sanitizeNameInput(raw);
+                        if (CONTAINS_DIGITS_OR_SYMBOLS_REGEX.test(raw) || (raw && raw !== clean)) {
+                          setEditNameError('Full name must contain letters only (no numbers or symbols).');
+                        } else {
+                          setEditNameError('');
+                        }
+                        setEditName(clean);
+                      }}
+                      onKeyDown={(e) => handleNameKeyDown(e, setEditNameError)}
+                      onPaste={(e) => handleNamePaste(e, setEditName, setEditNameError)}
+                      inputMode="text"
+                      autoComplete="name"
+                      className={`w-full bg-black-pure border ${editNameError ? 'border-red-500/80 focus:border-red-500' : 'border-gold/30 focus:border-gold'} px-3 py-2 text-white text-xs focus:outline-none`}
                     />
+                    {editNameError && (
+                      <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1">
+                        <span>⚠</span> {editNameError}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-[10px] font-mono uppercase text-gray-400 mb-1">Email Address *</label>
@@ -1473,14 +1534,29 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-mono uppercase text-gray-400 mb-1">Phone / WhatsApp</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[10px] font-mono uppercase text-gray-400">Phone / WhatsApp</label>
+                    </div>
                     <input 
-                      type="text" 
+                      type="tel" 
+                      maxLength={10}
                       value={editPhone} 
-                      onChange={(e) => setEditPhone(e.target.value)} 
-                      placeholder="+256 700 000 000"
-                      className="w-full bg-black-pure border border-gold/30 focus:border-gold px-3 py-2 text-white text-xs focus:outline-none"
+                      onChange={(e) => {
+                        const clean = sanitizePhoneInput(e.target.value);
+                        setEditPhone(clean);
+                        if (editPhoneError) setEditPhoneError('');
+                      }} 
+                      onKeyDown={(e) => handlePhoneKeyDown(e, setEditPhoneError)}
+                      onPaste={(e) => handlePhonePaste(e, setEditPhone, setEditPhoneError)}
+                      inputMode="tel"
+                      placeholder="0700000000"
+                      className={`w-full bg-black-pure border ${editPhoneError ? 'border-red-500/80 focus:border-red-500' : 'border-gold/30 focus:border-gold'} px-3 py-2 text-white text-xs focus:outline-none`}
                     />
+                    {editPhoneError && (
+                      <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1">
+                        <span>⚠</span> {editPhoneError}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-[10px] font-mono uppercase text-gray-400 mb-1">Account Role</label>
@@ -1911,17 +1987,37 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
 
             <form onSubmit={handleSubmitNewUser} className="space-y-4 text-xs">
               <div>
-                <label className="block text-gray-300 font-mono text-[10px] uppercase mb-1 font-semibold">
-                  Client Full Name *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-gray-300 font-mono text-[10px] uppercase font-semibold">
+                    Client Full Name *
+                  </label>
+                </div>
                 <input
                   type="text"
                   required
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const clean = sanitizeNameInput(raw);
+                    if (CONTAINS_DIGITS_OR_SYMBOLS_REGEX.test(raw) || (raw && raw !== clean)) {
+                      setNameError('Client name must contain letters only (no numbers or symbols).');
+                    } else {
+                      setNameError('');
+                    }
+                    setName(clean);
+                  }}
+                  onKeyDown={(e) => handleNameKeyDown(e, setNameError)}
+                  onPaste={(e) => handleNamePaste(e, setName, setNameError)}
+                  inputMode="text"
+                  autoComplete="name"
                   placeholder="e.g. Jonathan Vance"
-                  className="w-full bg-black-rich border border-gold/30 p-2.5 text-white focus:outline-none focus:border-gold transition-colors placeholder:text-gray-600"
+                  className={`w-full bg-black-rich border ${nameError ? 'border-red-500/80 focus:border-red-500' : 'border-gold/30 focus:border-gold'} p-2.5 text-white focus:outline-none transition-colors placeholder:text-gray-600`}
                 />
+                {nameError && (
+                  <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1">
+                    <span>⚠</span> {nameError}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -1939,16 +2035,31 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               </div>
 
               <div>
-                <label className="block text-gray-300 font-mono text-[10px] uppercase mb-1 font-semibold">
-                  Phone Number / WhatsApp
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-gray-300 font-mono text-[10px] uppercase font-semibold">
+                    Phone Number / WhatsApp
+                  </label>
+                </div>
                 <input
                   type="tel"
+                  maxLength={10}
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+256 700 000 000"
-                  className="w-full bg-black-rich border border-gold/30 p-2.5 text-white focus:outline-none focus:border-gold transition-colors placeholder:text-gray-600 font-mono"
+                  onChange={(e) => {
+                    const clean = sanitizePhoneInput(e.target.value);
+                    setPhone(clean);
+                    if (phoneError) setPhoneError('');
+                  }}
+                  onKeyDown={(e) => handlePhoneKeyDown(e, setPhoneError)}
+                  onPaste={(e) => handlePhonePaste(e, setPhone, setPhoneError)}
+                  inputMode="tel"
+                  placeholder="0700000000"
+                  className={`w-full bg-black-rich border ${phoneError ? 'border-red-500/80 focus:border-red-500' : 'border-gold/30 focus:border-gold'} p-2.5 text-white focus:outline-none transition-colors placeholder:text-gray-600 font-mono`}
                 />
+                {phoneError && (
+                  <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1">
+                    <span>⚠</span> {phoneError}
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

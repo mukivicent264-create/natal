@@ -4,19 +4,102 @@ import { Send, MapPin, Phone, Mail, CheckCircle, MessageSquare } from 'lucide-re
 import { companyDetails } from '../data';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
-import { syncUserRecord, recordUserActivity } from '../utils';
+import { 
+  syncUserRecord, 
+  recordUserActivity, 
+  triggerOwnerEmailNotification,
+  sanitizeNameInput,
+  isValidName,
+  isValidEmail,
+  CONTAINS_DIGITS_OR_SYMBOLS_REGEX,
+  handleNameKeyDown,
+  handleNamePaste
+} from '../utils';
 import { useSectionContent, ContactContent, defaultContactContent } from '../siteContent';
+import GoldSpinner from './GoldSpinner';
 
 export default function Contact() {
   const { content } = useSectionContent<ContactContent>('contact', defaultContactContent);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
+  const [nameError, setNameError] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [messageError, setMessageError] = useState('');
+  const [formError, setFormError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const clean = sanitizeNameInput(raw);
+    if (CONTAINS_DIGITS_OR_SYMBOLS_REGEX.test(raw) || (raw && raw !== clean)) {
+      setNameError('Name must contain letters only (no numbers, digits or symbols).');
+    } else {
+      setNameError('');
+    }
+    setName(clean);
+    if (formError) setFormError('');
+  };
+
+  const handleNameBlur = () => {
+    if (name.trim() && !isValidName(name)) {
+      setNameError('Please enter a valid full name (letters only, at least 2 characters).');
+    } else {
+      setNameError('');
+    }
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEmail(e.target.value);
+    if (emailError) setEmailError('');
+    if (formError) setFormError('');
+  };
+
+  const handleEmailBlur = () => {
+    if (email.trim() && !isValidEmail(email)) {
+      setEmailError('Please enter a valid email address (e.g. name@domain.com).');
+    } else {
+      setEmailError('');
+    }
+  };
+
+  const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setMessage(e.target.value);
+    if (messageError) setMessageError('');
+    if (formError) setFormError('');
+  };
+
+  const handleMessageBlur = () => {
+    if (message.trim() && message.trim().length < 5) {
+      setMessageError('Message must be at least 5 characters long.');
+    } else {
+      setMessageError('');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !email.trim()) return;
+    setFormError('');
+
+    // Strict validation
+    if (!name.trim() || !isValidName(name)) {
+      setNameError('Name must contain letters only (no numbers, digits or symbols) and be at least 2 characters.');
+      setFormError('Please enter a valid full name with letters only.');
+      return;
+    }
+
+    if (!email.trim() || !isValidEmail(email)) {
+      setEmailError('Please enter a valid email address.');
+      setFormError('Please enter a valid email address.');
+      return;
+    }
+
+    if (!message.trim() || message.trim().length < 5) {
+      setMessageError('Please enter a message of at least 5 characters describing your project.');
+      setFormError('Please enter your project message.');
+      return;
+    }
 
     const leadData = {
       name: name.trim(),
@@ -27,6 +110,7 @@ export default function Contact() {
       createdAt: new Date().toISOString()
     };
 
+    setIsSubmitting(true);
     try {
       try {
         await addDoc(collection(db, 'leads'), {
@@ -59,6 +143,15 @@ export default function Contact() {
         }
       });
 
+      // Automatically queue notification for Firebase Trigger Email Extension (owner inbox)
+      triggerOwnerEmailNotification({
+        leadType: 'Contact Form',
+        name: name.trim(),
+        email: email.trim(),
+        service: 'General Inquiry',
+        details: message.trim()
+      }).catch(mailErr => console.warn('Email trigger note:', mailErr));
+
       setSubmitted(true);
       setName('');
       setEmail('');
@@ -67,6 +160,8 @@ export default function Contact() {
     } catch (err) {
       console.error(err);
       setSubmitted(true);
+    } finally {
+      setIsSubmitting(false);
     }
   };
   return (
@@ -102,51 +197,98 @@ export default function Contact() {
               </div>
             ) : (
               <form className="space-y-3 sm:space-y-3.5" onSubmit={handleSubmit}>
+                {formError && (
+                  <div className="p-2.5 bg-red-950/80 border border-red-500/70 text-red-200 text-xs font-mono flex items-center gap-1.5">
+                    <span className="text-red-400 font-bold">⚠</span>
+                    <span>{formError}</span>
+                  </div>
+                )}
+
                 <div>
-                  <label htmlFor="name" className="block text-[11px] uppercase tracking-wider text-gray-400 mb-1.5 font-semibold">Full Name *</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label htmlFor="name" className="block text-[11px] uppercase tracking-wider text-gray-400 font-semibold">Full Name *</label>
+                  </div>
                   <input 
                     type="text" 
                     id="name" 
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/10 text-white px-3.5 py-2.5 text-sm focus:outline-none focus:border-gold/50 focus:bg-white/[0.05] transition-colors"
-                    placeholder="John Doe"
+                    onChange={handleNameChange}
+                    onKeyDown={(e) => handleNameKeyDown(e, setNameError)}
+                    onPaste={(e) => handleNamePaste(e, setName, setNameError)}
+                    onBlur={handleNameBlur}
+                    inputMode="text"
+                    autoComplete="name"
+                    className={`w-full bg-white/[0.03] border ${nameError ? 'border-red-500/80 focus:border-red-500' : 'border-white/10 focus:border-gold/50'} text-white px-3.5 py-2.5 text-sm focus:outline-none focus:bg-white/[0.05] transition-colors`}
+                    placeholder="e.g. John Kasule"
                     required
                   />
+                  {nameError && (
+                    <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1">
+                      <span>⚠</span> {nameError}
+                    </p>
+                  )}
                 </div>
                 
                 <div>
-                  <label htmlFor="email" className="block text-[11px] uppercase tracking-wider text-gray-400 mb-1.5 font-semibold">Email Address *</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label htmlFor="email" className="block text-[11px] uppercase tracking-wider text-gray-400 font-semibold">Email Address *</label>
+                  </div>
                   <input 
                     type="email" 
                     id="email" 
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/10 text-white px-3.5 py-2.5 text-sm focus:outline-none focus:border-gold/50 focus:bg-white/[0.05] transition-colors"
+                    onChange={handleEmailChange}
+                    onBlur={handleEmailBlur}
+                    autoComplete="email"
+                    className={`w-full bg-white/[0.03] border ${emailError ? 'border-red-500/80 focus:border-red-500' : 'border-white/10 focus:border-gold/50'} text-white px-3.5 py-2.5 text-sm focus:outline-none focus:bg-white/[0.05] transition-colors`}
                     placeholder="john@example.com"
                     required
                   />
+                  {emailError && (
+                    <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1">
+                      <span>⚠</span> {emailError}
+                    </p>
+                  )}
                 </div>
 
                 <div>
-                  <label htmlFor="message" className="block text-[11px] uppercase tracking-wider text-gray-400 mb-1.5 font-semibold">Your Message *</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label htmlFor="message" className="block text-[11px] uppercase tracking-wider text-gray-400 font-semibold">Your Message *</label>
+                  </div>
                   <textarea 
                     id="message" 
                     rows={3}
                     value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/10 text-white px-3.5 py-2.5 text-sm focus:outline-none focus:border-gold/50 focus:bg-white/[0.05] transition-colors resize-none"
+                    onChange={handleMessageChange}
+                    onBlur={handleMessageBlur}
+                    minLength={5}
+                    className={`w-full bg-white/[0.03] border ${messageError ? 'border-red-500/80 focus:border-red-500' : 'border-white/10 focus:border-gold/50'} text-white px-3.5 py-2.5 text-sm focus:outline-none focus:bg-white/[0.05] transition-colors resize-none`}
                     placeholder="Tell us about your project requirements..."
                     required
                   ></textarea>
+                  {messageError && (
+                    <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1">
+                      <span>⚠</span> {messageError}
+                    </p>
+                  )}
                 </div>
 
                 <button 
                   type="submit"
-                  className="w-full h-11 sm:h-12 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-6 uppercase tracking-wider text-xs sm:text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.35)] active:scale-95 cursor-pointer group mt-1.5 rounded-sm"
+                  disabled={isSubmitting}
+                  className="w-full h-11 sm:h-12 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure px-6 uppercase tracking-wider text-xs sm:text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.35)] active:scale-95 cursor-pointer group mt-1.5 rounded-sm disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                  <span>Send Message</span>
-                  <Send size={14} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                  {isSubmitting ? (
+                    <>
+                      <GoldSpinner size="sm" />
+                      <span>Sending Message...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Send Message</span>
+                      <Send size={14} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                    </>
+                  )}
                 </button>
               </form>
             )}

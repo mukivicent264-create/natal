@@ -11,13 +11,14 @@ import {
   compressImageFile
 } from '../utils';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { auth } from '../firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { auth, db } from '../firebase';
 import NatalLogo from './NatalLogo';
 import { companyDetails } from '../data';
 
 interface NavbarProps {
   onNavigateHome?: (sectionId?: string) => void;
-  onNavigateToAuth?: () => void;
+  onNavigateToAuth?: (mode?: 'login' | 'register') => void;
 }
 
 const navLinks = [
@@ -36,6 +37,9 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<ActiveUserSession | null>(getActiveUserSession);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [isOwnerLive, setIsOwnerLive] = useState<boolean>(() => {
+    return localStorage.getItem('natal_owner_live') !== 'false';
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mobileFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -177,11 +181,32 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
     };
     window.addEventListener('storage', handleStorage);
 
+    const handleOwnerLive = (e: any) => {
+      if (e?.detail?.isLive !== undefined) {
+        setIsOwnerLive(Boolean(e.detail.isLive));
+      }
+    };
+    window.addEventListener('natal_owner_presence_changed', handleOwnerLive);
+
+    let unsubPresence: (() => void) | undefined;
+    try {
+      unsubPresence = onSnapshot(doc(db, 'site_settings', 'owner_presence'), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data?.isLive !== undefined) {
+            setIsOwnerLive(Boolean(data.isLive));
+          }
+        }
+      }, () => {});
+    } catch {}
+
     return () => {
       window.removeEventListener('natal_user_session_changed', handleSessionChange);
       window.removeEventListener('natal_admin_profile_changed', handleAdminProfileChange);
       window.removeEventListener('natal_users_updated', handleUsersUpdated);
       window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('natal_owner_presence_changed', handleOwnerLive);
+      if (unsubPresence) unsubPresence();
       unsubscribe();
     };
   }, []);
@@ -257,7 +282,8 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
   };
 
   const isAdmin = Boolean(
-    currentUser?.email && currentUser.email.toLowerCase().includes('admin')
+    (currentUser?.email && currentUser.email.toLowerCase().includes('admin')) ||
+    localStorage.getItem('natal_admin_authenticated') === 'true'
   );
 
   const adminProfile = getAdminProfile();
@@ -337,14 +363,14 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                   <span>Dashboard</span>
                 </button>
 
-                {/* Profile Icon for Admin */}
+                {/* Profile Icon for Admin with Circular Live Dot on Top */}
                 <div className="relative">
                   <button
                     type="button"
                     onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
                     className="relative p-0.5 rounded-full border-2 border-gold/70 hover:border-gold transition-all duration-200 cursor-pointer shadow-[0_0_15px_rgba(212,175,55,0.3)] hover:scale-105 active:scale-95 flex items-center justify-center bg-black-pure"
                     aria-label="Admin Profile"
-                    title={displayName}
+                    title={`${displayName} (Owner Live)`}
                   >
                     <div className="w-8 h-8 sm:w-9 sm:h-9 md:w-9.5 md:h-9.5 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-br from-gold/30 via-black-rich to-black-pure text-gold font-bold font-mono text-[11px] sm:text-xs select-none">
                       {displayAvatar ? (
@@ -357,13 +383,13 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                         <span>{initials}</span>
                       )}
                     </div>
-
-                    {/* Active Badge Status Icon */}
-                    <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center" title="Active">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 border border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
-                    </span>
                   </button>
+
+                  {/* Circular Live Dot on Top of Admin Profile */}
+                  <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none" title="Owner Live">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
+                  </span>
 
                   {/* Profile Dropdown Menu */}
                   <AnimatePresence>
@@ -389,7 +415,7 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                                 <span>{initials}</span>
                               )}
                             </div>
-                            <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
+                            <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
                               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure"></span>
                             </span>
                           </div>
@@ -404,6 +430,15 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                             <div className="mt-1 flex items-center gap-1.5 text-[9px] font-mono text-emerald-400">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span>
                               <span>Administrator Active</span>
+                            </div>
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <span className="px-2 py-0.5 bg-emerald-950/90 border border-emerald-500/60 text-emerald-300 font-mono text-[9px] uppercase tracking-wider font-extrabold rounded-full flex items-center gap-1 shadow-sm">
+                                <span className="relative flex h-1.5 w-1.5">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                </span>
+                                <span>Owner Live</span>
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -467,45 +502,62 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                 </div>
               </div>
             ) : currentUser ? (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
-                  className="relative p-0.5 rounded-full border-2 border-gold/70 hover:border-gold transition-all duration-200 cursor-pointer shadow-[0_0_15px_rgba(212,175,55,0.3)] hover:scale-105 active:scale-95 flex items-center justify-center bg-black-pure ml-1"
-                  aria-label="User Profile"
-                  title={displayName}
-                >
-                  <div className="w-8 h-8 lg:w-9 lg:h-9 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-br from-gold/30 via-black-rich to-black-pure text-gold font-bold font-mono text-xs lg:text-sm select-none">
-                    {displayAvatar ? (
-                      <img 
-                        src={displayAvatar} 
-                        alt={displayName} 
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span>{initials}</span>
-                    )}
-                  </div>
+              <div className="flex items-center">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+                    className="relative p-0.5 rounded-full border-2 border-gold/70 hover:border-gold transition-all duration-200 cursor-pointer shadow-[0_0_15px_rgba(212,175,55,0.3)] hover:scale-105 active:scale-95 flex items-center justify-center bg-black-pure ml-1"
+                    aria-label="User Profile"
+                    title={`${displayName} (Owner Live)`}
+                  >
+                    <div className="w-8 h-8 lg:w-9 lg:h-9 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-br from-gold/30 via-black-rich to-black-pure text-gold font-bold font-mono text-xs lg:text-sm select-none">
+                      {displayAvatar ? (
+                        <img 
+                          src={displayAvatar} 
+                          alt={displayName} 
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span>{initials}</span>
+                      )}
+                    </div>
+                  </button>
 
-                  {/* Active Badge Status Icon */}
-                  <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center" title="Active">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border-[1.5px] border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
+                  {/* Circular Live Dot on Top of User Profile */}
+                  <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none" title="Live">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
                   </span>
-                </button>
 
-                {/* Profile Dropdown Menu */}
-                <AnimatePresence>
-                  {profileDropdownOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute right-0 top-full mt-3 w-64 bg-black-rich/98 backdrop-blur-xl border border-gold/40 shadow-[0_20px_50px_rgba(0,0,0,0.95)] z-50 p-4 rounded-sm text-left"
-                    >
-                      {/* Header info */}
-                      <div className="flex items-center gap-3 pb-3 border-b border-white/10">
+                  {/* Profile Dropdown Menu */}
+                  <AnimatePresence>
+                    {profileDropdownOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute right-0 top-full mt-3 w-64 bg-black-rich/98 backdrop-blur-xl border border-gold/40 shadow-[0_20px_50px_rgba(0,0,0,0.95)] z-50 p-4 rounded-sm text-left"
+                      >
+                        {/* Studio Owner Live Status Banner for Logged-In User */}
+                        <div className="mb-2.5 px-2.5 py-1.5 bg-gradient-to-r from-emerald-950/80 via-emerald-950/50 to-black-pure border border-emerald-500/40 rounded-sm flex items-center justify-between shadow-sm">
+                          <div className="flex items-center gap-2">
+                            <span className="relative flex h-2 w-2 shrink-0">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                            </span>
+                            <span className="text-[10px] font-mono font-extrabold uppercase tracking-wider text-emerald-300">
+                              Studio Owner is Live
+                            </span>
+                          </div>
+                          <span className="text-[8px] font-mono uppercase text-emerald-400 bg-emerald-900/70 px-1.5 py-0.5 rounded font-bold border border-emerald-500/30">
+                            Online Now
+                          </span>
+                        </div>
+
+                        {/* Header info */}
+                        <div className="flex items-center gap-3 pb-3 border-b border-white/10">
                         <div className="relative shrink-0">
                           <div className="w-11 h-11 rounded-full overflow-hidden border border-gold/70 flex items-center justify-center bg-black-pure text-gold font-bold font-mono text-sm shadow-md">
                             {displayAvatar ? (
@@ -519,7 +571,7 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                             )}
                           </div>
                           {/* Active badge */}
-                          <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
+                          <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
                             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure"></span>
                           </span>
                         </div>
@@ -601,11 +653,15 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                   )}
                 </AnimatePresence>
               </div>
-            ) : (
+            </div>
+          ) : (
               <button
                 onClick={() => {
-                  window.location.hash = '#register';
-                  if (onNavigateToAuth) onNavigateToAuth();
+                  if (onNavigateToAuth) {
+                    onNavigateToAuth('register');
+                  } else {
+                    window.location.hash = '#register';
+                  }
                   setMobileMenuOpen(false);
                 }}
                 className="whitespace-nowrap px-3.5 sm:px-4 h-9 sm:h-9.5 md:h-10 bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold text-[11px] sm:text-xs uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)] hover:scale-105 active:scale-95 cursor-pointer rounded-sm inline-flex items-center justify-center gap-1.5 ml-1"
@@ -739,9 +795,10 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                                 <span>{initials}</span>
                               )}
                             </div>
-                            <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center">
+                            {/* Circular Live Dot on top of avatar */}
+                            <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
-                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure"></span>
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
                             </span>
                           </div>
                           <div className="overflow-hidden">
@@ -792,10 +849,10 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                               <span>{initials}</span>
                             )}
                           </div>
-                          {/* Active badge */}
-                          <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center">
+                          {/* Circular Live dot on top of avatar */}
+                          <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
                           </span>
                         </div>
                         <div className="overflow-hidden">
@@ -849,8 +906,11 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                   ) : (
                     <button
                       onClick={() => {
-                        window.location.hash = '#register';
-                        if (onNavigateToAuth) onNavigateToAuth();
+                        if (onNavigateToAuth) {
+                          onNavigateToAuth('register');
+                        } else {
+                          window.location.hash = '#register';
+                        }
                         setMobileMenuOpen(false);
                       }}
                       className="w-full h-9 sm:h-10 flex items-center justify-center gap-2.5 text-xs uppercase tracking-wider bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.4)] active:scale-98 transition-all rounded-sm cursor-pointer"

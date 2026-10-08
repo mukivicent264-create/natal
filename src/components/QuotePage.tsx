@@ -4,7 +4,26 @@ import { companyDetails } from '../data';
 import React, { useState, useRef, useEffect } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
-import { syncUserRecord, recordUserActivity, compressImageFile, readFileAsDataUrl, storeSafeMediaAssetInCloud, captureVideoThumbnail } from '../utils';
+import { 
+  syncUserRecord, 
+  recordUserActivity, 
+  compressImageFile, 
+  readFileAsDataUrl, 
+  storeSafeMediaAssetInCloud, 
+  captureVideoThumbnail, 
+  triggerOwnerEmailNotification,
+  sanitizeNameInput,
+  isValidName,
+  sanitizePhoneInput,
+  isValidPhone,
+  isValidEmail,
+  CONTAINS_DIGITS_OR_SYMBOLS_REGEX,
+  handleNameKeyDown,
+  handleNamePaste,
+  handlePhoneKeyDown,
+  handlePhonePaste
+} from '../utils';
+import GoldSpinner from './GoldSpinner';
 
 interface QuotePageProps {
   onNavigateHome: (sectionId?: string) => void;
@@ -20,12 +39,17 @@ const serviceOptions = [
 
 export default function QuotePage({ onNavigateHome }: QuotePageProps) {
   const [submitted, setSubmitted] = useState(false);
+  const [submittedEmail, setSubmittedEmail] = useState('');
   const [selectedService, setSelectedService] = useState(serviceOptions[0]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [details, setDetails] = useState('');
+  const [nameError, setNameError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [formError, setFormError] = useState('');
   const [attachedFile, setAttachedFile] = useState<{
     name: string;
     type: string;
@@ -36,6 +60,7 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
     data: string;
   } | null>(null);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const handleFileAttachmentChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -119,18 +144,90 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const clean = sanitizeNameInput(raw);
+    if (CONTAINS_DIGITS_OR_SYMBOLS_REGEX.test(raw) || (raw && raw !== clean)) {
+      setNameError('Full name must contain letters only (no numbers, digits or symbols).');
+    } else {
+      setNameError('');
+    }
+    setFullName(clean);
+    if (formError) setFormError('');
+  };
+
+  const handleNameBlur = () => {
+    if (fullName.trim() && !isValidName(fullName)) {
+      setNameError('Please enter a valid full name (letters only, at least 2 characters).');
+    } else {
+      setNameError('');
+    }
+  };
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const clean = sanitizePhoneInput(raw);
+    setPhone(clean);
+    if (phoneError) setPhoneError('');
+    if (formError) setFormError('');
+  };
+
+  const handlePhoneBlur = () => {
+    if (phone.trim() && !isValidPhone(phone)) {
+      setPhoneError('Please enter a valid phone number with digits (at least 7 digits).');
+    } else {
+      setPhoneError('');
+    }
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEmail(e.target.value);
+    if (emailError) setEmailError('');
+    if (formError) setFormError('');
+  };
+
+  const handleEmailBlur = () => {
+    if (email.trim() && !isValidEmail(email)) {
+      setEmailError('Please enter a valid email address (e.g. client@example.com).');
+    } else {
+      setEmailError('');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError('');
+
+    // Strict validation constraints
+    if (!fullName.trim() || !isValidName(fullName)) {
+      setNameError('Full name must contain letters only (no numbers, digits, or symbols) and be at least 2 characters.');
+      setFormError('Please enter a valid full name with letters only.');
+      return;
+    }
+
+    if (!phone.trim() || !isValidPhone(phone)) {
+      setPhoneError('Please enter a valid phone number (at least 7 digits).');
+      setFormError('Please enter a valid phone number.');
+      return;
+    }
+
+    if (email.trim() && !isValidEmail(email)) {
+      setEmailError('Please enter a valid email address.');
+      setFormError('Please enter a valid email address.');
+      return;
+    }
+
     const leadData = {
-      name: fullName,
-      phone,
-      email,
+      name: fullName.trim(),
+      phone: phone.trim(),
+      email: email.trim(),
       service: selectedService.value,
-      details,
+      details: details.trim(),
       fileAttachment: attachedFile || undefined,
       createdAt: new Date().toISOString()
     };
 
+    setIsSubmitting(true);
     try {
       // Save to Firestore
       try {
@@ -169,16 +266,31 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
         }
       });
 
+      // Automatically queue notification for Firebase Trigger Email Extension (owner inbox)
+      triggerOwnerEmailNotification({
+        leadType: 'Quotation Request',
+        name: fullName.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        service: selectedService.value,
+        details: details.trim(),
+        fileAttachmentName: attachedFile?.name
+      }).catch(mailErr => console.warn('Email trigger note:', mailErr));
+
+      const clientEmailToConfirm = email.trim();
+      setSubmittedEmail(clientEmailToConfirm);
       setSubmitted(true);
       setFullName('');
       setPhone('');
       setEmail('');
       setDetails('');
       setAttachedFile(null);
-      setTimeout(() => setSubmitted(false), 5000);
+      setTimeout(() => setSubmitted(false), 7000);
     } catch (err) {
       console.error(err);
       setSubmitted(true);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -385,41 +497,85 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
           <div className="lg:col-span-7 bg-white/5 backdrop-blur-xl border border-gold/50 p-8 md:p-12 rounded-none shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
             
               <form onSubmit={handleSubmit} className="space-y-7">
+                {formError && (
+                  <div className="p-3 bg-red-950/80 border border-red-500/70 text-red-200 text-xs font-mono flex items-center gap-2">
+                    <span className="text-red-400 font-bold">⚠ Error:</span>
+                    <span>{formError}</span>
+                  </div>
+                )}
+
                 <div className="grid md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-xs uppercase tracking-widest text-gray-300 mb-2.5 font-semibold">Full Name *</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs uppercase tracking-widest text-gray-300 font-semibold">Full Name *</label>
+                    </div>
                     <input 
                       required 
                       type="text" 
                       value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      placeholder="John Doe" 
-                      className="w-full bg-white/10 hover:bg-white/15 focus:bg-white/20 border border-gold/50 focus:border-gold rounded-none px-5 py-4 text-white text-sm focus:outline-none transition-all shadow-inner placeholder:text-gray-400" 
+                      onChange={handleNameChange}
+                      onKeyDown={(e) => handleNameKeyDown(e, setNameError)}
+                      onPaste={(e) => handleNamePaste(e, setFullName, setNameError)}
+                      onBlur={handleNameBlur}
+                      inputMode="text"
+                      autoComplete="name"
+                      placeholder="e.g. John Kasule" 
+                      className={`w-full bg-white/10 hover:bg-white/15 focus:bg-white/20 border ${nameError ? 'border-red-500/80 focus:border-red-500' : 'border-gold/50 focus:border-gold'} rounded-none px-5 py-4 text-white text-sm focus:outline-none transition-all shadow-inner placeholder:text-gray-400`}
                     />
+                    {nameError && (
+                      <p className="text-[11px] font-mono text-red-400 mt-1.5 flex items-center gap-1">
+                        <span>⚠</span> {nameError}
+                      </p>
+                    )}
                   </div>
                   <div>
-                    <label className="block text-xs uppercase tracking-widest text-gray-300 mb-2.5 font-semibold">Phone Number *</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs uppercase tracking-widest text-gray-300 font-semibold">Phone Number *</label>
+                    </div>
                     <input 
                       required 
                       type="tel" 
+                      maxLength={10}
                       value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="0700 000 000" 
-                      className="w-full bg-white/10 hover:bg-white/15 focus:bg-white/20 border border-gold/50 focus:border-gold rounded-none px-5 py-4 text-white text-sm focus:outline-none transition-all shadow-inner placeholder:text-gray-400" 
+                      onChange={handlePhoneChange}
+                      onKeyDown={(e) => handlePhoneKeyDown(e, setPhoneError)}
+                      onPaste={(e) => handlePhonePaste(e, setPhone, setPhoneError)}
+                      onBlur={handlePhoneBlur}
+                      inputMode="tel"
+                      autoComplete="tel"
+                      placeholder="0700000000" 
+                      className={`w-full bg-white/10 hover:bg-white/15 focus:bg-white/20 border ${phoneError ? 'border-red-500/80 focus:border-red-500' : 'border-gold/50 focus:border-gold'} rounded-none px-5 py-4 text-white text-sm focus:outline-none transition-all shadow-inner placeholder:text-gray-400 font-mono`}
                     />
+                    {phoneError && (
+                      <p className="text-[11px] font-mono text-red-400 mt-1.5 flex items-center gap-1">
+                        <span>⚠</span> {phoneError}
+                      </p>
+                    )}
                   </div>
                 </div>
 
                 <div className="grid md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-xs uppercase tracking-widest text-gray-300 mb-2.5 font-semibold">Email Address</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs uppercase tracking-widest text-gray-300 font-semibold">Email Address</label>
+                      <span className="text-[10px] font-mono text-gray-400">Optional</span>
+                    </div>
                     <input 
                       type="email" 
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={handleEmailChange}
+                      onBlur={handleEmailBlur}
+                      pattern="^[^\s@]+@[^\s@]+\.[^\s@]{2,}$"
+                      title="Please enter a valid email address"
+                      autoComplete="email"
                       placeholder="client@example.com" 
-                      className="w-full bg-white/10 hover:bg-white/15 focus:bg-white/20 border border-gold/50 focus:border-gold rounded-none px-5 py-4 text-white text-sm focus:outline-none transition-all shadow-inner placeholder:text-gray-400" 
+                      className={`w-full bg-white/10 hover:bg-white/15 focus:bg-white/20 border ${emailError ? 'border-red-500/80 focus:border-red-500' : 'border-gold/50 focus:border-gold'} rounded-none px-5 py-4 text-white text-sm focus:outline-none transition-all shadow-inner placeholder:text-gray-400`}
                     />
+                    {emailError && (
+                      <p className="text-[11px] font-mono text-red-400 mt-1.5 flex items-center gap-1">
+                        <span>⚠</span> {emailError}
+                      </p>
+                    )}
                   </div>
                   <div ref={dropdownRef}>
                     <label className="block text-xs uppercase tracking-widest text-gray-300 mb-2.5 font-semibold">Select Service *</label>
@@ -504,7 +660,7 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
                       />
                       {isProcessingFile ? (
                         <div className="flex items-center gap-3 py-2">
-                          <div className="w-5 h-5 border-2 border-gold border-t-transparent rounded-full animate-spin"></div>
+                          <GoldSpinner size="sm" />
                           <span className="text-xs font-mono text-gold animate-pulse">Safely encrypting and uploading to Cloud Storage...</span>
                         </div>
                       ) : (
@@ -564,9 +720,22 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
                 </div>
 
                 <div className="pt-2">
-                  <button type="submit" className="w-full py-2.5 sm:py-3 px-4 sm:px-6 bg-gold hover:bg-gold-light text-black-pure uppercase tracking-wider font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_6px_20px_rgba(212,175,55,0.25)] rounded-sm hover:scale-[1.01] active:scale-95">
-                    <Send size={15} className="flex-shrink-0" />
-                    <span className="whitespace-nowrap">Submit Quote</span>
+                  <button 
+                    type="submit" 
+                    disabled={isSubmitting}
+                    className="w-full py-2.5 sm:py-3 px-4 sm:px-6 bg-gold hover:bg-gold-light disabled:opacity-50 text-black-pure uppercase tracking-wider font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_6px_20px_rgba(212,175,55,0.25)] rounded-sm hover:scale-[1.01] active:scale-95"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <GoldSpinner size="sm" />
+                        <span className="whitespace-nowrap font-mono">Submitting Quote...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send size={15} className="flex-shrink-0" />
+                        <span className="whitespace-nowrap">Submit Quote</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
@@ -593,10 +762,21 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
               <div className="w-24 h-24 rounded-full bg-gold/20 border-2 border-gold flex items-center justify-center text-gold mx-auto mb-6 shadow-[0_0_40px_rgba(212,175,55,0.4)]">
                 <CheckCircle size={48} />
               </div>
-              <h4 className="font-heading text-2xl md:text-4xl text-white font-bold mb-4">Request Received!</h4>
-              <p className="text-gray-300 text-sm md:text-base leading-relaxed mb-8">
-                Thank you for reaching out. Our project engineer will review your details and contact you via call or WhatsApp within the next 2 hours.
+              <h4 className="font-heading text-2xl md:text-4xl text-white font-bold mb-4">Quotation Received!</h4>
+              <p className="text-gray-300 text-sm md:text-base leading-relaxed mb-4">
+                Thank you for reaching out. Your quotation request has been securely dispatched to our project engineering team. Our lead project engineer will review your project scope and contact you via call or WhatsApp within the next 2 hours.
               </p>
+              {submittedEmail && (
+                <div className="bg-black-pure/70 border border-gold/30 p-3 mb-6 text-xs text-gray-300 font-mono text-left space-y-1">
+                  <div className="text-gold font-semibold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <CheckCircle size={13} className="text-emerald-400" />
+                    <span>Email Confirmation Sent</span>
+                  </div>
+                  <p className="text-gray-400">
+                    An automated copy/confirmation has been dispatched to <strong className="text-white">{submittedEmail}</strong>. (Be sure to check your Spam or Promotions folder if not in primary inbox).
+                  </p>
+                </div>
+              )}
               <button 
                 onClick={() => setSubmitted(false)}
                 className="w-full py-3.5 sm:py-4 px-4 sm:px-6 bg-gold hover:bg-gold-light text-black-pure uppercase tracking-wider sm:tracking-widest font-bold text-xs sm:text-sm transition-all rounded-none shadow-[0_10px_30px_rgba(212,175,55,0.25)] hover:scale-[1.01] active:scale-95 cursor-pointer"

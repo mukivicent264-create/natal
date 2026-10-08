@@ -35,6 +35,19 @@
         "createdAt": "timestamp"
       }
     },
+    "mail": {
+      "description": "Trigger Email extension queue for owner notifications and client confirmations",
+      "fields": {
+        "to": "array",
+        "replyTo": "string",
+        "message": "object",
+        "leadType": "string",
+        "clientName": "string",
+        "clientEmail": "string",
+        "clientPhone": "string",
+        "createdAt": "timestamp"
+      }
+    },
     "users": {
       "description": "Registered VIP clients and quotation form users",
       "fields": {

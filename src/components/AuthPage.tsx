@@ -7,7 +7,26 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../firebase';
-import { syncUserRecord, recordUserActivity, setActiveUserSession, getActiveUserSession, clearActiveUserSession, getUserFromDirectory } from '../utils';
+import { 
+  syncUserRecord, 
+  recordUserActivity, 
+  setActiveUserSession, 
+  getActiveUserSession, 
+  clearActiveUserSession, 
+  getUserFromDirectory, 
+  triggerOwnerEmailNotification,
+  sanitizeNameInput,
+  isValidName,
+  sanitizePhoneInput,
+  isValidPhone,
+  isValidEmail,
+  CONTAINS_DIGITS_OR_SYMBOLS_REGEX,
+  handleNameKeyDown,
+  handleNamePaste,
+  handlePhoneKeyDown,
+  handlePhonePaste
+} from '../utils';
+import GoldSpinner from './GoldSpinner';
 
 interface AuthPageProps {
   onNavigateHome: (sectionId?: string) => void;
@@ -54,6 +73,10 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
   const [agreedToPolicies, setAgreedToPolicies] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [activeSession, setActiveSession] = useState(getActiveUserSession);
+  const [nameError, setNameError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   
   const [formData, setFormData] = useState({
     fullName: '',
@@ -65,6 +88,70 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
     projectNotes: '',
     vipInviteCode: ''
   });
+
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const clean = sanitizeNameInput(raw);
+    if (CONTAINS_DIGITS_OR_SYMBOLS_REGEX.test(raw) || (raw && raw !== clean)) {
+      setNameError('Full name must contain letters only (no numbers or symbols).');
+    } else {
+      setNameError('');
+    }
+    setFormData(prev => ({ ...prev, fullName: clean }));
+    if (errorMsg) setErrorMsg('');
+  };
+
+  const handleNameBlur = () => {
+    if (formData.fullName.trim() && !isValidName(formData.fullName)) {
+      setNameError('Please enter a valid full name (letters only, at least 2 characters).');
+    } else {
+      setNameError('');
+    }
+  };
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const clean = sanitizePhoneInput(raw);
+    setFormData(prev => ({ ...prev, phone: clean }));
+    if (phoneError) setPhoneError('');
+    if (errorMsg) setErrorMsg('');
+  };
+
+  const handlePhoneBlur = () => {
+    if (formData.phone.trim() && !isValidPhone(formData.phone)) {
+      setPhoneError('Please enter a valid phone number with digits (at least 7 digits).');
+    } else {
+      setPhoneError('');
+    }
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData(prev => ({ ...prev, email: e.target.value }));
+    if (emailError) setEmailError('');
+    if (errorMsg) { setErrorMsg(''); setErrorAction(null); }
+  };
+
+  const handleEmailBlur = () => {
+    if (formData.email.trim() && !isValidEmail(formData.email)) {
+      setEmailError('Please enter a valid email address (e.g. client@nataldesign.com).');
+    } else {
+      setEmailError('');
+    }
+  };
+
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData(prev => ({ ...prev, password: e.target.value }));
+    if (passwordError) setPasswordError('');
+    if (errorMsg) { setErrorMsg(''); setErrorAction(null); }
+  };
+
+  const handlePasswordBlur = () => {
+    if (authMode === 'register' && formData.password && formData.password.length < 6) {
+      setPasswordError('Password must be at least 6 characters.');
+    } else {
+      setPasswordError('');
+    }
+  };
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' });
@@ -91,10 +178,53 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setNameError('');
+    setPhoneError('');
+    setEmailError('');
+    setPasswordError('');
 
-    if (authMode === 'register' && !agreedToPolicies) {
-      setErrorMsg('Please check the box to agree with the Natal privacy policies to continue.');
-      return;
+    if (authMode === 'register') {
+      if (!formData.fullName.trim() || !isValidName(formData.fullName)) {
+        setNameError('Full name must contain letters only (no numbers, digits or symbols) and be at least 2 characters.');
+        setErrorMsg('Please enter a valid full name with letters only.');
+        return;
+      }
+
+      if (!formData.email.trim() || !isValidEmail(formData.email)) {
+        setEmailError('Please enter a valid email address.');
+        setErrorMsg('Please enter a valid email address.');
+        return;
+      }
+
+      if (!formData.phone.trim() || !isValidPhone(formData.phone)) {
+        setPhoneError('Please enter a valid phone number (at least 7 digits).');
+        setErrorMsg('Please enter a valid phone number with digits only.');
+        return;
+      }
+
+      if (!formData.password || formData.password.length < 6) {
+        setPasswordError('Password must be at least 6 characters.');
+        setErrorMsg('Password must be at least 6 characters.');
+        return;
+      }
+
+      if (!agreedToPolicies) {
+        setErrorMsg('Please check the box to agree with the Natal privacy policies to continue.');
+        return;
+      }
+    } else {
+      // Login mode validation
+      if (!formData.email.trim() || !isValidEmail(formData.email)) {
+        setEmailError('Please enter a valid email address.');
+        setErrorMsg('Please enter a valid email address.');
+        return;
+      }
+
+      if (!formData.password) {
+        setPasswordError('Please enter your password or master passcode.');
+        setErrorMsg('Please enter your password.');
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -218,6 +348,18 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
             }
           }
         });
+
+        // Trigger notification email to owner inbox for new VIP client registration
+        if (!isAdminEmail) {
+          triggerOwnerEmailNotification({
+            leadType: 'VIP Registration',
+            name: formData.fullName.trim() || 'VIP Client',
+            email: formData.email.trim(),
+            phone: formData.phone.trim(),
+            service: formData.service,
+            details: `New VIP Client registered on Natal platform. Property type: ${formData.projectType || 'General'}. Scope: ${vipScopeDesc}`
+          }).catch(mailErr => console.warn('Email trigger note:', mailErr));
+        }
 
         setActiveUserSession({
           email: formData.email.trim(),
@@ -416,6 +558,13 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
                     setAuthMode('login'); 
                     setErrorMsg(''); 
                     setErrorAction(null); 
+                    setNameError('');
+                    setPhoneError('');
+                    setEmailError('');
+                    setPasswordError('');
+                    if (typeof window !== 'undefined') {
+                      window.location.hash = '#auth';
+                    }
                   }}
                   className={`py-2.5 px-3 text-center uppercase tracking-wider text-xs font-bold transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap ${
                     authMode === 'login' 
@@ -433,6 +582,13 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
                     setAuthMode('register'); 
                     setErrorMsg(''); 
                     setErrorAction(null); 
+                    setNameError('');
+                    setPhoneError('');
+                    setEmailError('');
+                    setPasswordError('');
+                    if (typeof window !== 'undefined') {
+                      window.location.hash = '#register';
+                    }
                   }}
                   className={`py-2.5 px-3 text-center uppercase tracking-wider text-xs font-bold transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap ${
                     authMode === 'register' 
@@ -475,44 +631,78 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
                   exit={{ opacity: 0, y: -6 }}
                   transition={{ duration: 0.2 }}
                   onSubmit={handleSubmit}
+                  noValidate
                   className="space-y-3.5 my-auto w-full min-w-0 max-w-full overflow-hidden"
                 >
 
                     {/* Full Name (Registration only) */}
                     {authMode === 'register' && (
                       <div>
-                        <label className="block text-[11px] font-mono uppercase tracking-wider text-gray-300 font-semibold mb-1.5 flex items-center gap-1.5">
-                          <User size={13} className="text-gold" />
-                          <span>Full Name *</span>
-                        </label>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="block text-[11px] font-mono uppercase tracking-wider text-gray-300 font-semibold flex items-center gap-1.5">
+                            <User size={13} className="text-gold" />
+                            <span>Full Name *</span>
+                          </label>
+                        </div>
                         <input 
                           type="text" 
+                          id="auth-name-input"
                           required
                           value={formData.fullName}
-                          onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                          onChange={handleNameChange}
+                          onKeyDown={(e) => {
+                            handleNameKeyDown(e, setNameError);
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              document.getElementById('auth-email-input')?.focus();
+                            }
+                          }}
+                          onPaste={(e) => handleNamePaste(e, (val) => setFormData(prev => ({ ...prev, fullName: val })), setNameError)}
+                          onBlur={handleNameBlur}
+                          inputMode="text"
+                          autoComplete="name"
                           placeholder="e.g. David Kasule"
-                          className="w-full bg-black-rich/80 border border-white/20 focus:border-gold px-4 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-gold/30 transition-all shadow-inner"
+                          className={`w-full bg-black-rich/80 border ${nameError ? 'border-red-500/80 focus:border-red-500' : 'border-white/20 focus:border-gold'} px-4 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-gold/30 transition-all shadow-inner`}
                         />
+                        {nameError && (
+                          <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1">
+                            <span>⚠</span> {nameError}
+                          </p>
+                        )}
                       </div>
                     )}
 
                     {/* Email Address */}
                     <div>
-                      <label className="block text-[11px] font-mono uppercase tracking-wider text-gray-300 font-semibold mb-1.5 flex items-center gap-1.5">
-                        <Mail size={13} className="text-gold" />
-                        <span>Email Address *</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-[11px] font-mono uppercase tracking-wider text-gray-300 font-semibold flex items-center gap-1.5">
+                          <Mail size={13} className="text-gold" />
+                          <span>Email Address *</span>
+                        </label>
+                      </div>
                       <input 
                         type="email" 
+                        id="auth-email-input"
                         required
                         value={formData.email}
-                        onChange={(e) => {
-                          setFormData({ ...formData, email: e.target.value });
-                          if (errorMsg) { setErrorMsg(''); setErrorAction(null); }
+                        onChange={handleEmailChange}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const nextTarget = authMode === 'register' ? 'auth-phone-input' : 'auth-password-input';
+                            document.getElementById(nextTarget)?.focus();
+                          }
                         }}
+                        onBlur={handleEmailBlur}
+                        autoComplete="email"
                         placeholder="client@nataldesign.com or admin@nataldesign.com"
-                        className="w-full bg-black-rich/80 border border-white/20 focus:border-gold px-4 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-gold/30 transition-all shadow-inner"
+                        className={`w-full bg-black-rich/80 border ${emailError ? 'border-red-500/80 focus:border-red-500' : 'border-white/20 focus:border-gold'} px-4 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-gold/30 transition-all shadow-inner`}
                       />
+                      {emailError && (
+                        <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1">
+                          <span>⚠</span> {emailError}
+                        </p>
+                      )}
 
                       {/* Admin Email Indicator */}
                       {formData.email.trim().toLowerCase().includes('admin') && (
@@ -530,18 +720,38 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
                       <>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full min-w-0">
                           <div className="min-w-0 w-full">
-                            <label className="block text-[11px] font-mono uppercase tracking-wider text-gray-300 font-semibold mb-1.5 flex items-center gap-1.5">
-                              <Phone size={13} className="text-gold" />
-                              <span>Phone / WhatsApp *</span>
-                            </label>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <label className="block text-[11px] font-mono uppercase tracking-wider text-gray-300 font-semibold flex items-center gap-1.5">
+                                <Phone size={13} className="text-gold" />
+                                <span>Phone / WhatsApp *</span>
+                              </label>
+                            </div>
                             <input 
                               type="tel" 
+                              id="auth-phone-input"
                               required
+                              maxLength={10}
                               value={formData.phone}
-                              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                              placeholder="+256 700 000 000"
-                              className="w-full max-w-full bg-black-rich/80 border border-white/20 focus:border-gold px-3.5 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-gold/30 transition-all font-mono shadow-inner box-border min-w-0"
+                              onChange={handlePhoneChange}
+                              onKeyDown={(e) => {
+                                handlePhoneKeyDown(e, setPhoneError);
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  document.getElementById('auth-password-input')?.focus();
+                                }
+                              }}
+                              onPaste={(e) => handlePhonePaste(e, (val) => setFormData(prev => ({ ...prev, phone: val })), setPhoneError)}
+                              onBlur={handlePhoneBlur}
+                              inputMode="tel"
+                              autoComplete="tel"
+                              placeholder="0700000000"
+                              className={`w-full max-w-full bg-black-rich/80 border ${phoneError ? 'border-red-500/80 focus:border-red-500' : 'border-white/20 focus:border-gold'} px-3.5 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-gold/30 transition-all font-mono shadow-inner box-border min-w-0`}
                             />
+                            {phoneError && (
+                              <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1">
+                                <span>⚠</span> {phoneError}
+                              </p>
+                            )}
                           </div>
 
                           <div className="min-w-0 w-full">
@@ -621,11 +831,13 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
                       <div className="relative">
                         <input 
                           type={showPassword ? "text" : "password"} 
+                          id="auth-password-input"
                           required
                           value={formData.password}
-                          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                          onChange={handlePasswordChange}
+                          onBlur={handlePasswordBlur}
                           placeholder="••••••••••••"
-                          className="w-full bg-black-rich/80 border border-white/20 focus:border-gold pl-4 pr-11 py-3.5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-gold/30 transition-all shadow-inner"
+                          className={`w-full bg-black-rich/80 border ${passwordError ? 'border-red-500/80 focus:border-red-500' : 'border-white/20 focus:border-gold'} pl-4 pr-11 py-3.5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-gold/30 transition-all shadow-inner`}
                         />
                         <button 
                           type="button" 
@@ -636,10 +848,9 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
                           {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
                       </div>
-                      {authMode === 'register' && (
-                        <p className="text-[10px] text-gray-400 mt-1.5 font-mono flex items-center gap-1">
-                          <CheckCircle2 size={11} className="text-gold" />
-                          <span>Minimum 6 characters • Directly saved to client directory</span>
+                      {passwordError && (
+                        <p className="text-[10px] font-mono text-red-400 mt-1.5 flex items-center gap-1">
+                          <span>⚠</span> {passwordError}
                         </p>
                       )}
                     </div>
@@ -698,13 +909,17 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
                         disabled={isSubmitting}
                         className="w-full py-3.5 sm:py-4 uppercase tracking-[0.16em] font-bold text-xs sm:text-sm transition-all duration-200 cursor-pointer shadow-[0_4px_20px_rgba(212,175,55,0.3)] disabled:opacity-50 flex items-center justify-center gap-2 bg-gradient-to-r from-gold-dark via-gold to-yellow-300 text-black-pure hover:brightness-110 active:scale-[0.99]"
                       >
-                        <span>
-                          {isSubmitting 
-                            ? 'Processing...' 
-                            : (authMode === 'login' ? 'Sign In to Portal' : 'Register VIP Account')
-                          }
-                        </span>
-                        <ArrowRight size={15} />
+                        {isSubmitting ? (
+                          <div className="flex items-center gap-2">
+                            <GoldSpinner size="sm" />
+                            <span>Processing...</span>
+                          </div>
+                        ) : (
+                          <>
+                            <span>{authMode === 'login' ? 'Sign In to Portal' : 'Register VIP Account'}</span>
+                            <ArrowRight size={15} />
+                          </>
+                        )}
                       </button>
                     </div>
 

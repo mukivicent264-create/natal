@@ -4,6 +4,7 @@ import { ArrowLeft, Search, Sparkles, Filter, CheckCircle2, ArrowUpRight, Slider
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cardHighlights, projectsData } from '../data';
+import { ProjectCardSkeleton } from './SkeletonLoader';
 
 interface FeaturedCreationsPageProps {
   onNavigateHome: (sectionId?: string) => void;
@@ -46,6 +47,7 @@ export default function FeaturedCreationsPage({ onNavigateHome }: FeaturedCreati
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [firebaseProjects, setFirebaseProjects] = useState<any[]>([]);
+  const [isLoadingCreations, setIsLoadingCreations] = useState(true);
   const [selectedCreation, setSelectedCreation] = useState<typeof allCreationsList[0] | null>(null);
 
   // Guarantee page displays strictly from the top on mount
@@ -121,6 +123,7 @@ export default function FeaturedCreationsPage({ onNavigateHome }: FeaturedCreati
         });
 
         setFirebaseProjects(uniqueMerged);
+        setIsLoadingCreations(false);
       }, (err) => {
         console.warn("Firestore listener error, loading from local cache:", err);
         const localProjects = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
@@ -132,6 +135,7 @@ export default function FeaturedCreationsPage({ onNavigateHome }: FeaturedCreati
           return true;
         });
         setFirebaseProjects(uniqueLocal);
+        setIsLoadingCreations(false);
       });
     } catch (e) {
       console.warn("Error setting up Firestore listener:", e);
@@ -144,12 +148,28 @@ export default function FeaturedCreationsPage({ onNavigateHome }: FeaturedCreati
         return true;
       });
       setFirebaseProjects(uniqueLocal);
+      setIsLoadingCreations(false);
     }
     return () => unsubscribe();
   }, []);
 
   const seenCreations = new Set<string>();
-  const combinedCreationsList = [...firebaseProjects, ...allCreationsList].filter((item, idx) => {
+  const overriddenCreations = new Set<string>();
+
+  firebaseProjects.forEach(p => {
+    if (p.originalId) overriddenCreations.add(p.originalId.toLowerCase());
+    if (p.cardHighlightId) overriddenCreations.add(p.cardHighlightId.toLowerCase());
+    if (p.originalTitle) overriddenCreations.add(p.originalTitle.trim().toLowerCase());
+    if (p.title) overriddenCreations.add(p.title.trim().toLowerCase());
+  });
+
+  const filteredStaticCreations = allCreationsList.filter(item => {
+    const itemTitle = (item.title || '').trim().toLowerCase();
+    const itemId = (item.id || '').toLowerCase();
+    return !overriddenCreations.has(itemTitle) && !overriddenCreations.has(itemId);
+  });
+
+  const combinedCreationsList = [...firebaseProjects, ...filteredStaticCreations].filter((item, idx) => {
     const k = item.id || `c-${idx}`;
     if (seenCreations.has(k)) return false;
     seenCreations.add(k);
@@ -294,8 +314,11 @@ export default function FeaturedCreationsPage({ onNavigateHome }: FeaturedCreati
 
         {/* Creations Grid (2 columns on mobile, 3 on tablet, 6 on laptop with generous spacing) */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-3.5 sm:gap-x-5 lg:gap-x-6 xl:gap-x-8 gap-y-6 sm:gap-y-8 lg:gap-y-10">
-          <AnimatePresence>
-            {filteredCreations.map((item, itemIdx) => (
+          {isLoadingCreations ? (
+            <ProjectCardSkeleton count={6} />
+          ) : (
+            <AnimatePresence>
+              {filteredCreations.map((item, itemIdx) => (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -395,6 +418,7 @@ export default function FeaturedCreationsPage({ onNavigateHome }: FeaturedCreati
               </motion.div>
             ))}
           </AnimatePresence>
+        )}
         </div>
 
         {filteredCreations.length === 0 && (

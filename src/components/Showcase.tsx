@@ -16,10 +16,14 @@ export default function Showcase() {
         const fbCreations = snapshot.docs.map(doc => {
           const data = doc.data();
           return {
+            id: doc.id,
             title: data.title,
             category: data.category,
             image: data.image,
             desc: data.desc || data.description || '',
+            originalTitle: data.originalTitle,
+            cardHighlightId: data.cardHighlightId,
+            section: data.section,
             isNew: true
           };
         });
@@ -27,12 +31,16 @@ export default function Showcase() {
         const localData = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
         const combined = [...fbCreations];
         localData.forEach((lp: any) => {
-          if (!combined.some(c => c.title === lp.title)) {
+          if (!combined.some(c => c.id === lp.id || c.title === lp.title)) {
             combined.unshift({
+              id: lp.id,
               title: lp.title,
               category: lp.category,
               image: lp.image,
               desc: lp.desc || lp.description || '',
+              originalTitle: lp.originalTitle,
+              cardHighlightId: lp.cardHighlightId,
+              section: lp.section,
               isNew: true
             });
           }
@@ -58,10 +66,14 @@ export default function Showcase() {
           return true;
         });
         setUploadedCreations(uniqueLocal.map((lp: any) => ({
+          id: lp.id,
           title: lp.title,
           category: lp.category,
           image: lp.image,
           desc: lp.desc || lp.description || '',
+          originalTitle: lp.originalTitle,
+          cardHighlightId: lp.cardHighlightId,
+          section: lp.section,
           isNew: true
         })));
       });
@@ -72,7 +84,21 @@ export default function Showcase() {
   }, []);
 
   const seenAllTitles = new Set<string>();
-  const allShowcaseItems = [...uploadedCreations, ...cardHighlights].filter((item, idx) => {
+  const overriddenHighlightKeys = new Set<string>();
+
+  uploadedCreations.forEach(c => {
+    if (c.originalTitle) overriddenHighlightKeys.add(c.originalTitle.trim().toLowerCase());
+    if (c.cardHighlightId) overriddenHighlightKeys.add(c.cardHighlightId.toLowerCase());
+    if (c.title) overriddenHighlightKeys.add(c.title.trim().toLowerCase());
+  });
+
+  const remainingHighlights = cardHighlights.filter((ch, idx) => {
+    const chTitle = (ch.title || '').trim().toLowerCase();
+    const chId = `card-highlight-${idx}`.toLowerCase();
+    return !overriddenHighlightKeys.has(chTitle) && !overriddenHighlightKeys.has(chId);
+  });
+
+  const allShowcaseItems = [...uploadedCreations, ...remainingHighlights].filter((item, idx) => {
     const k = (item.title || '').trim().toLowerCase() || `item-${idx}`;
     if (seenAllTitles.has(k)) return false;
     seenAllTitles.add(k);

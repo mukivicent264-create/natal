@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
 import { companyDetails, whyChooseUsData, processSteps } from './data';
-import { sanitizeForFirestore } from './utils';
+import { sanitizeForFirestore, optimizeBase64Image } from './utils';
 
 // ---------------------------------------------------------------------------
 // Section Content Types & Default Values
@@ -245,17 +245,89 @@ export function setCachedContent<T>(sectionId: string, content: T): void {
 // ---------------------------------------------------------------------------
 
 export async function saveSectionContent<T>(sectionId: string, content: T): Promise<void> {
-  // 1. Immediately cache locally and trigger broadcast for real-time reactivity
-  setCachedContent(sectionId, content);
+  // 1. Prepare safe content copy
+  let safeContent: any = { ...(content as any) };
 
-  // 2. Persist to Firestore with sanitized payload (strips undefined to avoid Firestore crashes)
+  // 2. Proactive optimization for Hero section to prevent 1MB limit errors
+  if (sectionId === 'hero' && safeContent) {
+    if (Array.isArray(safeContent.cards)) {
+      safeContent.cards = await Promise.all(
+        safeContent.cards.map(async (c: any) => {
+          if (c?.img && typeof c.img === 'string' && c.img.startsWith('data:image/') && c.img.length > 40 * 1024) {
+            try {
+              const opt = await optimizeBase64Image(c.img, 450, 320, 0.70);
+              return { ...c, img: opt };
+            } catch {
+              return c;
+            }
+          }
+          return c;
+        })
+      );
+    }
+
+    if (safeContent.backgroundImage && typeof safeContent.backgroundImage === 'string' && safeContent.backgroundImage.startsWith('data:image/') && safeContent.backgroundImage.length > 100 * 1024) {
+      try {
+        safeContent.backgroundImage = await optimizeBase64Image(safeContent.backgroundImage, 1100, 700, 0.72);
+      } catch (e) {
+        console.warn('Hero backgroundImage optimize note:', e);
+      }
+    }
+  }
+
+  // 3. General size check across any section to ensure payload never exceeds 500KB
+  let jsonLen = JSON.stringify(safeContent).length;
+  if (jsonLen > 500 * 1024) {
+    for (const [key, value] of Object.entries(safeContent)) {
+      if (typeof value === 'string' && value.startsWith('data:image/') && value.length > 60 * 1024) {
+        try {
+          safeContent[key] = await optimizeBase64Image(value, 800, 550, 0.68);
+        } catch {}
+      }
+    }
+  }
+
+  // 4. Update local cache with optimized content for instant UI responsiveness
+  setCachedContent(sectionId, safeContent);
+
+  // 5. Persist to Firestore with sanitized payload (strips undefined to avoid Firestore crashes)
   try {
     const payload = sanitizeForFirestore({
-      ...content,
+      ...safeContent,
       updatedAt: serverTimestamp()
     });
     await setDoc(doc(db, 'site_content', sectionId), payload, { merge: true });
-  } catch (err) {
+  } catch (err: any) {
+    // If a document size limit error occurs, execute aggressive emergency compression and retry
+    if (err?.message?.includes('exceeds the maximum allowed size') || err?.message?.includes('1,048,576 bytes')) {
+      console.warn(`[siteContent] Emergency resizing for [${sectionId}] to fit within 1MB limit...`);
+      if (sectionId === 'hero' && Array.isArray(safeContent.cards)) {
+        safeContent.cards = await Promise.all(
+          safeContent.cards.map(async (c: any) => ({
+            ...c,
+            img: c?.img?.startsWith('data:image/') ? await optimizeBase64Image(c.img, 360, 240, 0.60) : c.img
+          }))
+        );
+        if (safeContent.backgroundImage?.startsWith('data:image/')) {
+          safeContent.backgroundImage = await optimizeBase64Image(safeContent.backgroundImage, 800, 500, 0.62);
+        }
+      } else {
+        for (const [key, value] of Object.entries(safeContent)) {
+          if (typeof value === 'string' && value.startsWith('data:image/')) {
+            safeContent[key] = await optimizeBase64Image(value, 500, 350, 0.60);
+          }
+        }
+      }
+      try {
+        const retryPayload = sanitizeForFirestore({ ...safeContent, updatedAt: serverTimestamp() });
+        await setDoc(doc(db, 'site_content', sectionId), retryPayload, { merge: true });
+        setCachedContent(sectionId, safeContent);
+        return;
+      } catch (retryErr) {
+        console.error(`Emergency retry failed for [${sectionId}]:`, retryErr);
+        throw retryErr;
+      }
+    }
     console.error(`Firestore site_content write error for [${sectionId}]:`, err);
     throw err;
   }
