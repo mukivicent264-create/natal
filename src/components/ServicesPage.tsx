@@ -355,7 +355,7 @@ export default function ServicesPage({ onNavigateHome }: ServicesPageProps) {
             >
               <ArrowLeft size={24} className="group-hover:-translate-x-1.5 transition-transform" />
             </button>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5 sm:gap-3">
               <a
                 href="#quote"
                 className="bg-gold hover:bg-gold-light text-black-pure px-3 py-1 sm:px-3.5 sm:py-1.5 text-[9px] sm:text-xs font-bold uppercase tracking-wider transition-colors shadow-md cursor-pointer"

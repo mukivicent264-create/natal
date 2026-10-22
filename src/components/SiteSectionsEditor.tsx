@@ -15,7 +15,7 @@ import {
   ContactContent, defaultContactContent,
   useSectionContent
 } from '../siteContent';
-import { compressImageFile, processLogoImageFile, storeSafeMediaAssetInCloud, captureVideoThumbnail } from '../utils';
+import { compressImageFile, processLogoImageFile, storeSafeMediaAssetInCloud, captureVideoThumbnail, showAppNotification } from '../utils';
 
 type SectionKey = 'branding' | 'hero' | 'about' | 'why_us' | 'process' | 'stats' | 'contact';
 
@@ -306,7 +306,7 @@ const BrandingSectionEditor: React.FC<{ onNotify: (msg: string) => void }> = ({ 
       await updateContent(formData);
       onNotify('Brand & Logo settings published live across all devices.');
     } catch (err: any) {
-      alert('Failed to save brand settings: ' + err.message);
+      showAppNotification('Failed to save brand settings: ' + err.message, 'error');
     }
   };
 
@@ -344,7 +344,7 @@ const BrandingSectionEditor: React.FC<{ onNotify: (msg: string) => void }> = ({ 
       await updateContent(nextData);
       onNotify('Official logo uploaded and synced across desktop and mobile.');
     } catch (err: any) {
-      alert('Failed to process logo file: ' + err.message);
+      showAppNotification('Failed to process logo file: ' + err.message, 'error');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -779,7 +779,7 @@ const HeroSectionEditor: React.FC<{ onNotify: (msg: string) => void }> = ({ onNo
       onNotify('Hero section content published live.');
     } catch (err: any) {
       console.error('Hero section publish error:', err);
-      alert('Could not publish hero section: ' + (err?.message || 'Document limit error'));
+      showAppNotification('Could not publish hero section: ' + (err?.message || 'Document limit error'), 'error');
     }
   };
 
@@ -852,7 +852,7 @@ const HeroSectionEditor: React.FC<{ onNotify: (msg: string) => void }> = ({ onNo
       onNotify(`Hero video "${file.name}" uploaded and active.`);
     } catch (err: any) {
       console.error('Hero video upload error:', err);
-      alert('Error uploading video: ' + (err?.message || String(err)));
+      showAppNotification('Error uploading video: ' + (err?.message || String(err)), 'error');
     } finally {
       setIsVideoUploading(false);
       if (videoFileInputRef.current) videoFileInputRef.current.value = '';
@@ -871,7 +871,7 @@ const HeroSectionEditor: React.FC<{ onNotify: (msg: string) => void }> = ({ onNo
       await updateContent(next);
       onNotify(`Hero video set to "${presetName}".`);
     } catch (err: any) {
-      alert('Error applying video preset: ' + err.message);
+      showAppNotification('Error applying video preset: ' + err.message, 'error');
     }
   };
 
@@ -889,7 +889,7 @@ const HeroSectionEditor: React.FC<{ onNotify: (msg: string) => void }> = ({ onNo
       onNotify('Custom video URL applied.');
       setCustomVideoUrl('');
     } catch (err: any) {
-      alert('Error applying video URL: ' + err.message);
+      showAppNotification('Error applying video URL: ' + err.message, 'error');
     }
   };
 
@@ -933,7 +933,7 @@ const HeroSectionEditor: React.FC<{ onNotify: (msg: string) => void }> = ({ onNo
       onNotify(`Hero card #${idx + 1} updated.`);
     } catch (err: any) {
       console.error('Card image compression error:', err);
-      alert('Could not process this image file: ' + (err?.message || 'Storage error'));
+      showAppNotification('Could not process this image file: ' + (err?.message || 'Storage error'), 'error');
     } finally {
       setCardCompressingIdx(null);
     }

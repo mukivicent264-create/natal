@@ -12,6 +12,9 @@ import {
   storeSafeMediaAssetInCloud, 
   captureVideoThumbnail, 
   triggerOwnerEmailNotification,
+  triggerOwnerWhatsAppNotification,
+  triggerQuoteThankYouCallMeBot,
+  getWhatsAppServiceSettings,
   sanitizeNameInput,
   isValidName,
   sanitizePhoneInput,
@@ -40,6 +43,9 @@ const serviceOptions = [
 export default function QuotePage({ onNavigateHome }: QuotePageProps) {
   const [submitted, setSubmitted] = useState(false);
   const [submittedEmail, setSubmittedEmail] = useState('');
+  const [directOwnerWhatsAppUrl, setDirectOwnerWhatsAppUrl] = useState('');
+  const [clientThankYouWhatsAppUrl, setClientThankYouWhatsAppUrl] = useState('');
+  const [thankYouReceiptDispatched, setThankYouReceiptDispatched] = useState(false);
   const [selectedService, setSelectedService] = useState(serviceOptions[0]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -266,7 +272,7 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
         }
       });
 
-      // Automatically queue notification for Firebase Trigger Email Extension (owner inbox)
+      // Automatically queue notification for owner inbox and trigger WhatsApp notification
       triggerOwnerEmailNotification({
         leadType: 'Quotation Request',
         name: fullName.trim(),
@@ -277,6 +283,36 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
         fileAttachmentName: attachedFile?.name
       }).catch(mailErr => console.warn('Email trigger note:', mailErr));
 
+      triggerOwnerWhatsAppNotification({
+        leadType: 'Quotation Request',
+        name: fullName.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        service: selectedService.value,
+        details: details.trim(),
+        fileAttachmentName: attachedFile?.name
+      }).then(waRes => {
+        if (waRes?.directWhatsAppUrl) {
+          setDirectOwnerWhatsAppUrl(waRes.directWhatsAppUrl);
+        }
+      }).catch(waErr => console.warn('WhatsApp trigger note:', waErr));
+
+      // Automatically trigger thank-you confirmation message via CallMeBot API to confirm inquiry receipt
+      triggerQuoteThankYouCallMeBot({
+        clientName: fullName.trim(),
+        clientPhone: phone.trim(),
+        clientEmail: email.trim(),
+        service: selectedService.value,
+        details: details.trim()
+      }).then(tyRes => {
+        if (tyRes?.success) {
+          setThankYouReceiptDispatched(true);
+        }
+        if (tyRes?.directWhatsAppUrl) {
+          setClientThankYouWhatsAppUrl(tyRes.directWhatsAppUrl);
+        }
+      }).catch(tyErr => console.warn('CallMeBot thank-you trigger note:', tyErr));
+
       const clientEmailToConfirm = email.trim();
       setSubmittedEmail(clientEmailToConfirm);
       setSubmitted(true);
@@ -285,7 +321,7 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
       setEmail('');
       setDetails('');
       setAttachedFile(null);
-      setTimeout(() => setSubmitted(false), 7000);
+      setTimeout(() => setSubmitted(false), 14000);
     } catch (err) {
       console.error(err);
       setSubmitted(true);
@@ -308,7 +344,7 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
         <div className="absolute inset-0 bg-[radial-gradient(#D4AF37_1px,transparent_1px)] [background-size:24px_24px] opacity-15 pointer-events-none"></div>
 
         <div className="relative z-10 max-w-5xl mx-auto">
-          {/* Top Navigation with Arrow Only */}
+          {/* Top Navigation with Arrow and Theme Toggle */}
           <div className="flex items-center justify-between mb-3 sm:mb-4">
             <button
               onClick={() => onNavigateHome()}
@@ -719,6 +755,15 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
                   )}
                 </div>
 
+                <div className="pt-1 pb-1">
+                  <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-500/30 p-2.5 rounded-sm">
+                    <MessageSquare size={13} className="text-emerald-400 shrink-0" />
+                    <span className="text-xs text-gray-300">
+                      Direct WhatsApp Delivery: Quotation transmitted directly to Studio Owner ({getWhatsAppServiceSettings().ownerWhatsAppNumber})
+                    </span>
+                  </div>
+                </div>
+
                 <div className="pt-2">
                   <button 
                     type="submit" 
@@ -766,17 +811,74 @@ export default function QuotePage({ onNavigateHome }: QuotePageProps) {
               <p className="text-gray-300 text-sm md:text-base leading-relaxed mb-4">
                 Thank you for reaching out. Your quotation request has been securely dispatched to our project engineering team. Our lead project engineer will review your project scope and contact you via call or WhatsApp within the next 2 hours.
               </p>
-              {submittedEmail && (
-                <div className="bg-black-pure/70 border border-gold/30 p-3 mb-6 text-xs text-gray-300 font-mono text-left space-y-1">
-                  <div className="text-gold font-semibold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                    <CheckCircle size={13} className="text-emerald-400" />
-                    <span>Email Confirmation Sent</span>
+              
+              <div className="space-y-2.5 mb-6">
+                {submittedEmail && (
+                  <div className="bg-black-pure/70 border border-gold/30 p-3 text-xs text-gray-300 font-mono text-left space-y-1">
+                    <div className="text-gold font-semibold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                      <CheckCircle size={13} className="text-emerald-400" />
+                      <span>Email Confirmation Sent</span>
+                    </div>
+                    <p className="text-gray-400 text-[11px]">
+                      An automated receipt has been dispatched to <strong className="text-white">{submittedEmail}</strong>.
+                    </p>
                   </div>
-                  <p className="text-gray-400">
-                    An automated copy/confirmation has been dispatched to <strong className="text-white">{submittedEmail}</strong>. (Be sure to check your Spam or Promotions folder if not in primary inbox).
+                )}
+
+                <div className="bg-black-pure/80 border border-emerald-500/40 p-3.5 text-xs text-gray-300 font-mono text-left space-y-2.5">
+                  <div className="text-emerald-400 font-semibold uppercase tracking-wider text-[11px] flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <CheckCircle size={13} className="text-emerald-400" />
+                      <span>WhatsApp Lead Alert Dispatched</span>
+                    </span>
+                    <span className="text-[10px] text-emerald-300 bg-emerald-950/80 px-2 py-0.5 border border-emerald-500/30">
+                      Live to Owner
+                    </span>
+                  </div>
+                  <p className="text-gray-300 text-[11px]">
+                    Your project quotation has been recorded in the studio database and routed to Studio Owner ({getWhatsAppServiceSettings().ownerWhatsAppNumber}).
                   </p>
+                  {directOwnerWhatsAppUrl && (
+                    <a
+                      href={directOwnerWhatsAppUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 flex items-center justify-center gap-2 w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold uppercase tracking-wider text-xs transition-all shadow-lg"
+                    >
+                      <MessageSquare size={15} />
+                      <span>👉 Click to Open / Chat on WhatsApp with Studio Owner ({getWhatsAppServiceSettings().ownerWhatsAppNumber})</span>
+                    </a>
+                  )}
                 </div>
-              )}
+
+                {/* CallMeBot Thank-You Confirmation */}
+                <div className="bg-black-pure/80 border border-gold/40 p-3.5 text-xs text-gray-300 font-mono text-left space-y-2.5">
+                  <div className="text-gold font-semibold uppercase tracking-wider text-[11px] flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <CheckCircle size={13} className="text-gold" />
+                      <span>Inquiry Confirmation Dispatched (CallMeBot)</span>
+                    </span>
+                    <span className="text-[10px] text-gold-light bg-gold/15 px-2 py-0.5 border border-gold/30">
+                      Auto Thank-You
+                    </span>
+                  </div>
+                  <p className="text-gray-300 text-[11px]">
+                    An automatic thank-you message confirming inquiry receipt was triggered via CallMeBot API. Our senior design & engineering team will contact you within 2 business hours.
+                  </p>
+                  {clientThankYouWhatsAppUrl && (
+                    <a
+                      href={clientThankYouWhatsAppUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 flex items-center justify-center gap-2 w-full py-2 bg-gold/15 hover:bg-gold/25 text-gold-light border border-gold/40 font-bold uppercase tracking-wider text-[11px] transition-all"
+                    >
+                      <MessageSquare size={14} />
+                      <span>💬 View Your Inquiry Confirmation on WhatsApp</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+
               <button 
                 onClick={() => setSubmitted(false)}
                 className="w-full py-3.5 sm:py-4 px-4 sm:px-6 bg-gold hover:bg-gold-light text-black-pure uppercase tracking-wider sm:tracking-widest font-bold text-xs sm:text-sm transition-all rounded-none shadow-[0_10px_30px_rgba(212,175,55,0.25)] hover:scale-[1.01] active:scale-95 cursor-pointer"

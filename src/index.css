@@ -1,5 +1,5 @@
-@import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600&display=swap');
+@import "tailwindcss";
 
 @theme {
   --color-gold: #D4AF37;
@@ -145,3 +145,4 @@ a:active,
     -webkit-mask-image: none;
   }
 }
+

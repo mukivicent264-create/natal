@@ -31,7 +31,7 @@ export default function ProjectSpecsPage({
   const [sliderPercent, setSliderPercent] = useState<number>(50);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
 
-  // Sync state if initialProject changes
+  // Sync state if initialProject changes & record project view engagement
   useEffect(() => {
     setCurrentProject(initialProject);
     setViewMode('after');
@@ -41,6 +41,21 @@ export default function ProjectSpecsPage({
     if ((window as any).__lenis) {
       (window as any).__lenis.resize();
       (window as any).__lenis.scrollTo(0, { immediate: true });
+    }
+
+    // Track Project View Engagement Metric
+    if (initialProject) {
+      recordUserActivity({
+        type: 'specs_inquiry',
+        title: `Project Viewed: ${initialProject.title}`,
+        description: `Client inspected architectural specifications for ${initialProject.title} (${initialProject.category}).`,
+        metadata: {
+          projectId: initialProject.id,
+          projectTitle: initialProject.title,
+          category: initialProject.category,
+          eventType: 'project_view'
+        }
+      }).catch(() => {});
     }
   }, [initialProject]);
 

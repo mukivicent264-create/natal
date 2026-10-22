@@ -24,7 +24,7 @@
       }
     },
     "leads": {
-      "description": "Quote requests and contact inquiries",
+      "description": "Quote requests and contact inquiries with server-side notification processing",
       "fields": {
         "name": "string",
         "email": "string",
@@ -32,6 +32,10 @@
         "service": "string",
         "details": "string",
         "status": "string",
+        "serverProcessed": "boolean",
+        "serverNotifiedAt": "timestamp",
+        "notifiedAdminViaEmail": "boolean",
+        "notifiedAdminViaWhatsApp": "boolean",
         "createdAt": "timestamp"
       }
     },
@@ -45,6 +49,22 @@
         "clientName": "string",
         "clientEmail": "string",
         "clientPhone": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "whatsapp_notifications": {
+      "description": "Real-time automated WhatsApp notifications for all website activities dispatched to the website owner",
+      "fields": {
+        "recipientPhone": "string",
+        "activityType": "string",
+        "clientName": "string",
+        "clientPhone": "string",
+        "clientEmail": "string",
+        "service": "string",
+        "details": "string",
+        "message": "string",
+        "directWhatsAppUrl": "string",
+        "status": "string",
         "createdAt": "timestamp"
       }
     },
@@ -134,6 +154,31 @@
       "fields": {
         "sectionId": "string",
         "data": "object",
+        "updatedAt": "timestamp"
+      }
+    },
+    "whatsapp_notifications": {
+      "description": "Dispatched WhatsApp executive activity notifications and audit trail",
+      "fields": {
+        "recipientPhone": "string",
+        "activityType": "string",
+        "clientName": "string",
+        "clientPhone": "string",
+        "clientEmail": "string",
+        "service": "string",
+        "details": "string",
+        "message": "string",
+        "directWhatsAppUrl": "string",
+        "gatewayProvider": "string",
+        "status": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "settings": {
+      "description": "System-wide persistent configuration including WhatsApp gateway and Email routing",
+      "fields": {
+        "whatsapp": "object",
+        "email": "object",
         "updatedAt": "timestamp"
       }
     },

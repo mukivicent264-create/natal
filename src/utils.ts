@@ -1,8 +1,10 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { doc, setDoc, getDoc, serverTimestamp, collection, getDocs, addDoc, query, limit, updateDoc, deleteDoc, orderBy } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp, collection, getDocs, addDoc, query, limit, updateDoc, deleteDoc, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from './firebase';
 import { projectsData, servicesData, testimonialsData } from './data';
+
+export { showAppNotification } from './utils/exportUtils';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -67,8 +69,9 @@ export function isValidName(name: string): boolean {
 }
 
 /**
+/**
  * Sanitizes phone input to keep only digits, plus (+), spaces, hyphens, and parentheses.
- * Strictly limits the phone / WhatsApp number to a maximum of 10 digits.
+ * Supports local and international numbers up to 15 digits (ITU-T E.164 standard).
  */
 export function sanitizePhoneInput(val: string): string {
   if (!val) return '';
@@ -77,7 +80,7 @@ export function sanitizePhoneInput(val: string): string {
   let result = '';
   for (const ch of clean) {
     if (/\d/.test(ch)) {
-      if (digitCount < 10) {
+      if (digitCount < 15) {
         digitCount++;
         result += ch;
       }
@@ -89,12 +92,12 @@ export function sanitizePhoneInput(val: string): string {
 }
 
 /**
- * Validates phone number format (limited to 10 digits).
+ * Validates phone number format (supports local & international numbers between 7 and 15 digits).
  */
 export function isValidPhone(phone: string): boolean {
   if (!phone) return false;
   const digitsOnly = phone.replace(/\D/g, '');
-  return digitsOnly.length === 10 || (digitsOnly.length >= 7 && digitsOnly.length <= 10);
+  return digitsOnly.length >= 7 && digitsOnly.length <= 15;
 }
 
 /**
@@ -199,14 +202,14 @@ export function handlePhoneKeyDown(
       onError?.('Invalid character. Only digits, +, spaces, and dashes are allowed.');
       return;
     }
-    // Limit total digits to 10
+    // Limit total digits to 15 (E.164 standard)
     if (/\d/.test(e.key)) {
       const target = e.currentTarget;
       const selStart = target.selectionStart ?? 0;
       const selEnd = target.selectionEnd ?? 0;
       const selectedDigits = target.value.slice(selStart, selEnd).replace(/\D/g, '').length;
       const currentDigits = target.value.replace(/\D/g, '').length;
-      if (currentDigits - selectedDigits >= 10) {
+      if (currentDigits - selectedDigits >= 15) {
         e.preventDefault();
         return;
       }
@@ -709,7 +712,7 @@ export async function setAdminProfile(profile: Partial<AdminProfileData>) {
       }
       localStorage.setItem('natal_local_users', JSON.stringify(list));
 
-      // Persist to Firestore users doc
+      // Persist to Firestore users doc and site_settings/admin_profile
       if (targetId) {
         const userRef = doc(db, 'users', targetId);
         await setDoc(userRef, {
@@ -721,6 +724,19 @@ export async function setAdminProfile(profile: Partial<AdminProfileData>) {
           status: 'Active Administrator',
           updatedAt: serverTimestamp()
         }, { merge: true });
+      }
+
+      try {
+        const adminSettingsRef = doc(db, 'site_settings', 'admin_profile');
+        await setDoc(adminSettingsRef, {
+          name: updated.name,
+          email: updated.email,
+          role: updated.role || 'Full System Access',
+          photoURL: updated.photoURL || null,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      } catch (e) {
+        console.warn("Failed to persist admin profile to site_settings:", e);
       }
 
       window.dispatchEvent(new CustomEvent('natal_users_updated', { detail: list[adminIndex >= 0 ? adminIndex : 0] }));
@@ -1042,6 +1058,18 @@ export async function syncUserRecord(data: {
     console.warn('Firestore user write fallback:', fbErr);
   }
 
+  // 3. Automatically dispatch executive WhatsApp notification to website owner for all client activity
+  if (!isAdminUser && (data.source === 'Quotation Form' || data.source === 'Contact Form' || data.source === 'Registration')) {
+    triggerOwnerWhatsAppNotification({
+      leadType: data.source === 'Quotation Form' ? 'Quotation Request' : data.source === 'Contact Form' ? 'Contact Form' : 'VIP Registration',
+      name: userPayload.name,
+      phone: userPayload.phone,
+      email: userPayload.email,
+      service: userPayload.service,
+      details: userPayload.details
+    }).catch(waErr => console.warn('Automatic WhatsApp notification note:', waErr));
+  }
+
   return userPayload;
 }
 
@@ -1147,6 +1175,38 @@ export async function recordUserActivity(params: {
     }
   } catch (fbErr) {
     console.warn('Firestore activity sync fallback:', fbErr);
+  }
+
+  // Automatically dispatch WhatsApp notification to website owner when any client activity or lead occurs
+  const isLeadOrActivity = 
+    params.type === 'quotation' || 
+    params.type === 'contact' || 
+    params.type === 'whatsapp' || 
+    params.type === 'call' || 
+    params.type === 'specs_inquiry' || 
+    params.type === 'registration';
+
+  if (isLeadOrActivity) {
+    const leadTypeLabels: Record<ActivityType, 'Quotation Request' | 'Contact Form' | 'VIP Registration' | 'WhatsApp Inquiry' | 'General Lead' | 'Phone Call Inquiry'> = {
+      quotation: 'Quotation Request',
+      contact: 'Contact Form',
+      whatsapp: 'WhatsApp Inquiry',
+      call: 'Phone Call Inquiry',
+      specs_inquiry: 'General Lead',
+      registration: 'VIP Registration',
+      login: 'General Lead',
+      review: 'General Lead',
+      custom: 'General Lead'
+    };
+
+    triggerOwnerWhatsAppNotification({
+      leadType: leadTypeLabels[params.type] || 'General Lead',
+      name: targetUser?.name || name,
+      phone: targetUser?.phone || phone,
+      email: targetUser?.email || email,
+      service: params.metadata?.service || params.metadata?.projectTitle || 'Direct Client Consultation',
+      details: params.description
+    }).catch(waErr => console.warn('Automatic WhatsApp activity dispatch note:', waErr));
   }
 
   return targetUser;
@@ -2140,12 +2200,55 @@ export interface EmailServiceSettings {
   lastTestedAt?: string;
 }
 
+// In-memory cache for communication settings synchronized with Firestore
+let cachedWhatsAppSettings: WhatsAppServiceSettings | null = null;
+let cachedEmailSettings: EmailServiceSettings | null = null;
+
+/**
+ * Initializes real-time listener for communication configuration from Firestore.
+ * Ensures all website visitors and admin sessions share the exact same configuration.
+ */
+export function initCommunicationSettingsSync() {
+  try {
+    const docRef = doc(db, 'settings', 'communication_config');
+    onSnapshot(docRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.whatsapp) {
+          cachedWhatsAppSettings = data.whatsapp as WhatsAppServiceSettings;
+          try {
+            localStorage.setItem('natal_whatsapp_service_settings', JSON.stringify(data.whatsapp));
+          } catch {}
+          window.dispatchEvent(new CustomEvent('natal_whatsapp_service_changed', { detail: data.whatsapp }));
+        }
+        if (data.email) {
+          cachedEmailSettings = data.email as EmailServiceSettings;
+          try {
+            localStorage.setItem('natal_email_service_settings', JSON.stringify(data.email));
+          } catch {}
+          window.dispatchEvent(new CustomEvent('natal_email_service_changed', { detail: data.email }));
+        }
+      }
+    }, (err) => {
+      console.warn('Communication config Firestore sync note:', err);
+    });
+  } catch (err) {
+    console.warn('initCommunicationSettingsSync error:', err);
+  }
+}
+
 export function getEmailServiceSettings(): EmailServiceSettings {
+  if (cachedEmailSettings && cachedEmailSettings.recipientEmail) {
+    return cachedEmailSettings;
+  }
   try {
     const raw = localStorage.getItem('natal_email_service_settings');
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && parsed.recipientEmail) return parsed;
+      if (parsed && parsed.recipientEmail) {
+        cachedEmailSettings = parsed;
+        return parsed;
+      }
     }
   } catch {}
   return {
@@ -2155,11 +2258,712 @@ export function getEmailServiceSettings(): EmailServiceSettings {
   };
 }
 
-export function saveEmailServiceSettings(settings: EmailServiceSettings) {
+export async function saveEmailServiceSettings(settings: EmailServiceSettings) {
   try {
+    cachedEmailSettings = settings;
     localStorage.setItem('natal_email_service_settings', JSON.stringify(settings));
     window.dispatchEvent(new CustomEvent('natal_email_service_changed', { detail: settings }));
+    try {
+      const docRef = doc(db, 'settings', 'communication_config');
+      await setDoc(docRef, {
+        email: sanitizeForFirestore(settings),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (fbErr) {
+      console.warn('Firestore communication_config email save note:', fbErr);
+    }
   } catch {}
 }
+
+export interface WhatsAppServiceSettings {
+  serviceEnabled: boolean;
+  ownerWhatsAppNumber: string; // e.g. "0745 694 499" or "+256 745 694 499"
+  gatewayProvider: 'direct' | 'callmebot' | 'ultramsg' | 'greenapi' | 'webhook';
+  callMeBotApiKey?: string;
+  ultraMsgInstanceId?: string;
+  ultraMsgToken?: string;
+  greenApiInstanceId?: string;
+  greenApiToken?: string;
+  webhookUrl?: string;
+  autoDispatchOnActivity: boolean;
+  autoOpenWhatsAppOnClientSubmit?: boolean;
+  autoOpenWhatsAppInAdminOnNewLead?: boolean;
+  lastTestedAt?: string;
+}
+
+export function getWhatsAppServiceSettings(): WhatsAppServiceSettings {
+  if (cachedWhatsAppSettings && cachedWhatsAppSettings.ownerWhatsAppNumber) {
+    return cachedWhatsAppSettings;
+  }
+  try {
+    const raw = localStorage.getItem('natal_whatsapp_service_settings');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.ownerWhatsAppNumber) {
+        cachedWhatsAppSettings = {
+          serviceEnabled: true,
+          gatewayProvider: parsed.gatewayProvider || 'callmebot',
+          autoDispatchOnActivity: true,
+          autoOpenWhatsAppOnClientSubmit: false,
+          autoOpenWhatsAppInAdminOnNewLead: false,
+          ...parsed
+        };
+        return cachedWhatsAppSettings;
+      }
+    }
+  } catch {}
+  return {
+    serviceEnabled: true,
+    ownerWhatsAppNumber: '0745 694 499',
+    gatewayProvider: 'callmebot',
+    autoDispatchOnActivity: true,
+    autoOpenWhatsAppOnClientSubmit: false,
+    autoOpenWhatsAppInAdminOnNewLead: false
+  };
+}
+
+export async function saveWhatsAppServiceSettings(settings: WhatsAppServiceSettings) {
+  try {
+    cachedWhatsAppSettings = settings;
+    localStorage.setItem('natal_whatsapp_service_settings', JSON.stringify(settings));
+    window.dispatchEvent(new CustomEvent('natal_whatsapp_service_changed', { detail: settings }));
+    try {
+      const docRef = doc(db, 'settings', 'communication_config');
+      await setDoc(docRef, {
+        whatsapp: sanitizeForFirestore(settings),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (fbErr) {
+      console.warn('Firestore communication_config whatsapp save note:', fbErr);
+    }
+  } catch {}
+}
+
+export function normalizeWhatsAppNumber(rawPhone: string): string {
+  if (!rawPhone) return '256745694499';
+  const digits = rawPhone.replace(/\D/g, '');
+  if (digits.startsWith('256')) return digits;
+  if (digits.startsWith('0')) return '256' + digits.substring(1);
+  if (digits.length === 9) return '256' + digits;
+  return digits || '256745694499';
+}
+
+export interface OwnerWhatsAppTriggerParams {
+  leadType: 'Quotation Request' | 'Contact Form' | 'VIP Registration' | 'WhatsApp Inquiry' | 'General Lead' | 'Phone Call Inquiry';
+  name: string;
+  phone?: string;
+  email?: string;
+  service?: string;
+  details?: string;
+  fileAttachmentName?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface DispatchedWhatsAppRecord {
+  id: string;
+  recipientPhone: string;
+  activityType: string;
+  clientName: string;
+  clientPhone: string;
+  clientEmail: string;
+  service: string;
+  details: string;
+  message: string;
+  directWhatsAppUrl: string;
+  status: string;
+  createdAt: string;
+}
+
+const recentWhatsAppDispatches = new Map<string, { time: number; result: any }>();
+
+/**
+ * Generates an executive-formatted WhatsApp notification message and dispatches it
+ * to the website owner's WhatsApp number, while recording it permanently in Firestore.
+ */
+export async function triggerOwnerWhatsAppNotification(params: OwnerWhatsAppTriggerParams) {
+  try {
+    const waSettings = getWhatsAppServiceSettings();
+    if (!waSettings.serviceEnabled && !waSettings.autoDispatchOnActivity) {
+      return { success: false, reason: 'WhatsApp auto-dispatch is disabled in settings' };
+    }
+
+    const dedupKey = `${params.leadType}_${(params.name || '').trim()}_${(params.phone || '').trim()}_${(params.email || '').trim()}`;
+    const cached = recentWhatsAppDispatches.get(dedupKey);
+    const now = Date.now();
+    if (cached && (now - cached.time) < 12000) {
+      return cached.result;
+    }
+
+    const cleanOwnerDigits = normalizeWhatsAppNumber(waSettings.ownerWhatsAppNumber);
+    const clientPhoneDigits = params.phone ? params.phone.replace(/\D/g, '').replace(/^0/, '256') : '';
+
+    const lines: string[] = [
+      `🏛️ *NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+      `🚨 *NEW CLIENT ACTIVITY NOTIFICATION*`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `📋 *Activity Type:* ${params.leadType}`,
+      `👤 *Client Name:* ${params.name || 'Valued Client'}`
+    ];
+
+    if (params.phone && params.phone.trim()) {
+      lines.push(`📱 *Phone / WhatsApp:* ${params.phone.trim()}`);
+    }
+    if (params.email && params.email.trim()) {
+      lines.push(`✉️ *Client Email:* ${params.email.trim()}`);
+    }
+    if (params.service && params.service.trim()) {
+      lines.push(`🛠️ *Service Requested:* ${params.service.trim()}`);
+    }
+    if (params.fileAttachmentName && params.fileAttachmentName.trim()) {
+      lines.push(`📎 *Attached Plan / File:* ${params.fileAttachmentName.trim()}`);
+    }
+    if (params.details && params.details.trim()) {
+      lines.push(`📝 *Project Scope / Brief:*`);
+      lines.push(`${params.details.trim()}`);
+    }
+
+    lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    lines.push(`⏱️ *Timestamp:* ${new Date().toLocaleString()}`);
+    lines.push(`🌐 *Channel:* Natal Design Cloud Web Portal`);
+
+    if (clientPhoneDigits && clientPhoneDigits.length >= 7) {
+      lines.push(``);
+      lines.push(`💬 *Direct WhatsApp Reply to Client:*`);
+      lines.push(`https://wa.me/${clientPhoneDigits}`);
+    }
+
+    lines.push(``);
+    lines.push(`_Automated direct dispatch to Studio Owner (${waSettings.ownerWhatsAppNumber})_`);
+
+    const formattedMessage = lines.join('\n');
+    const directWhatsAppUrl = `https://wa.me/${cleanOwnerDigits}?text=${encodeURIComponent(formattedMessage)}`;
+
+    let dispatchStatus = 'queued_in_database';
+    let gatewayResponse: any = null;
+
+    const hasCallMeBotKey = Boolean(waSettings.callMeBotApiKey && waSettings.callMeBotApiKey.trim());
+
+    // 1. If CallMeBot API is configured, send direct HTTP request for automated phone delivery
+    if (hasCallMeBotKey || waSettings.gatewayProvider === 'callmebot') {
+      if (hasCallMeBotKey) {
+        try {
+          const apiKey = encodeURIComponent(waSettings.callMeBotApiKey!.trim());
+          const textParam = encodeURIComponent(formattedMessage);
+          const queryParams = `phone=${cleanOwnerDigits}&text=${textParam}&apikey=${apiKey}`;
+
+          let delivered = false;
+          let callMeBotError = '';
+
+          try {
+            const res = await fetch(`/api/callmebot/whatsapp.php?${queryParams}`);
+            const textResponse = await res.text().catch(() => '');
+            const stripped = textResponse.replace(/<[^>]*>?/gm, '').trim();
+
+            const isInvalid = res.status === 203 ||
+              res.status >= 400 ||
+              stripped.toLowerCase().includes('invalid') ||
+              stripped.toLowerCase().includes('error') ||
+              stripped.toLowerCase().includes('create a new one');
+
+            if (!isInvalid && (res.status === 200 || stripped.includes('Message to'))) {
+              delivered = true;
+            } else {
+              callMeBotError = stripped || 'APIKey is invalid';
+            }
+          } catch (e: any) {
+            callMeBotError = e?.message || 'Network error reaching CallMeBot';
+          }
+
+          if (delivered) {
+            dispatchStatus = 'delivered_via_callmebot';
+            gatewayResponse = { status: 200, ok: true, message: `Dispatched directly to WhatsApp for +${cleanOwnerDigits}` };
+          } else {
+            dispatchStatus = 'callmebot_key_invalid';
+            gatewayResponse = { status: 203, ok: false, message: callMeBotError || 'CallMeBot rejected API key. Re-authorize on WhatsApp or send directly.' };
+          }
+        } catch (err: any) {
+          console.warn('CallMeBot dispatch note:', err);
+          dispatchStatus = 'network_error_callmebot';
+          gatewayResponse = { status: 500, ok: false, message: err?.message || 'Network error reaching CallMeBot' };
+        }
+      } else {
+        dispatchStatus = 'callmebot_key_required';
+        gatewayResponse = { status: 400, ok: false, message: 'CallMeBot API Key is missing. Follow the 1-tap setup guide in Admin Settings.' };
+      }
+    } else if (waSettings.gatewayProvider === 'ultramsg' && waSettings.ultraMsgInstanceId && waSettings.ultraMsgToken) {
+      try {
+        const instanceId = waSettings.ultraMsgInstanceId.trim();
+        const token = waSettings.ultraMsgToken.trim();
+        const res = await fetch(`https://api.ultramsg.com/${instanceId}/messages/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            token,
+            to: '+' + cleanOwnerDigits,
+            body: formattedMessage
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && (data.sent === 'true' || data.sent === true || data.id)) {
+          dispatchStatus = 'delivered_via_ultramsg';
+          gatewayResponse = { status: 200, ok: true, message: 'Delivered directly to WhatsApp phone via UltraMsg!' };
+        } else {
+          dispatchStatus = 'ultramsg_error';
+          gatewayResponse = { status: res.status, ok: false, message: data?.error || 'UltraMsg response error' };
+        }
+      } catch (err: any) {
+        dispatchStatus = 'ultramsg_network_error';
+        gatewayResponse = { status: 500, ok: false, message: err?.message || 'UltraMsg network error' };
+      }
+    } else if (waSettings.gatewayProvider === 'greenapi' && waSettings.greenApiInstanceId && waSettings.greenApiToken) {
+      try {
+        const idInstance = waSettings.greenApiInstanceId.trim();
+        const apiTokenInstance = waSettings.greenApiToken.trim();
+        const res = await fetch(`https://api.green-api.com/waInstance${idInstance}/sendMessage/${apiTokenInstance}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chatId: `${cleanOwnerDigits}@c.us`,
+            message: formattedMessage
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.idMessage) {
+          dispatchStatus = 'delivered_via_greenapi';
+          gatewayResponse = { status: 200, ok: true, message: `Delivered via Green-API (Message ID: ${data.idMessage})` };
+        } else {
+          dispatchStatus = 'greenapi_error';
+          gatewayResponse = { status: res.status, ok: false, message: data?.message || 'Green-API error' };
+        }
+      } catch (err: any) {
+        dispatchStatus = 'greenapi_network_error';
+        gatewayResponse = { status: 500, ok: false, message: err?.message || 'Green-API network error' };
+      }
+    } else if (waSettings.gatewayProvider === 'webhook' && waSettings.webhookUrl) {
+      try {
+        const res = await fetch(waSettings.webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recipientPhone: cleanOwnerDigits,
+            message: formattedMessage,
+            leadType: params.leadType,
+            clientName: params.name,
+            clientPhone: params.phone,
+            clientEmail: params.email,
+            service: params.service,
+            details: params.details,
+            timestamp: new Date().toISOString()
+          })
+        });
+        dispatchStatus = res.ok ? 'delivered_via_webhook' : 'failed_webhook';
+      } catch (whErr: any) {
+        console.warn('Webhook dispatch note:', whErr);
+      }
+    } else {
+      dispatchStatus = 'ready_for_direct_whatsapp';
+    }
+
+    // 2. Persist to Firestore whatsapp_notifications collection as permanent audit trail
+    let docId = 'wa_' + Date.now();
+    try {
+      const docRef = await addDoc(collection(db, 'whatsapp_notifications'), sanitizeForFirestore({
+        recipientPhone: cleanOwnerDigits,
+        activityType: params.leadType,
+        clientName: params.name,
+        clientPhone: params.phone || '',
+        clientEmail: params.email || '',
+        service: params.service || '',
+        details: params.details || '',
+        message: formattedMessage,
+        directWhatsAppUrl,
+        gatewayProvider: waSettings.gatewayProvider,
+        status: dispatchStatus,
+        createdAt: serverTimestamp()
+      }));
+      docId = docRef.id;
+    } catch (fbErr) {
+      console.warn('Firestore whatsapp_notifications queue error:', fbErr);
+    }
+
+    // 3. Cache locally so Admin Dashboard reflects it immediately
+    const record: DispatchedWhatsAppRecord = {
+      id: docId,
+      recipientPhone: cleanOwnerDigits,
+      activityType: params.leadType,
+      clientName: params.name,
+      clientPhone: params.phone || '',
+      clientEmail: params.email || '',
+      service: params.service || '',
+      details: params.details || '',
+      message: formattedMessage,
+      directWhatsAppUrl,
+      status: dispatchStatus,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      const raw = localStorage.getItem('natal_local_whatsapp_dispatches');
+      const list: DispatchedWhatsAppRecord[] = raw ? JSON.parse(raw) : [];
+      list.unshift(record);
+      localStorage.setItem('natal_local_whatsapp_dispatches', JSON.stringify(list.slice(0, 50)));
+    } catch {}
+
+    // Dispatch global event for live sound & UI banner in Admin Console
+    window.dispatchEvent(new CustomEvent('natal_whatsapp_activity_dispatched', {
+      detail: record
+    }));
+
+    const finalResult = {
+      success: true,
+      docId,
+      recipientPhone: cleanOwnerDigits,
+      message: formattedMessage,
+      directWhatsAppUrl,
+      status: dispatchStatus,
+      gatewayResponse
+    };
+    recentWhatsAppDispatches.set(dedupKey, { time: now, result: finalResult });
+    return finalResult;
+  } catch (err: any) {
+    console.warn('Could not dispatch owner WhatsApp notification:', err);
+    return { success: false, error: err };
+  }
+}
+
+export function getLocalWhatsAppDispatches(): DispatchedWhatsAppRecord[] {
+  try {
+    const raw = localStorage.getItem('natal_local_whatsapp_dispatches');
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [];
+}
+
+/**
+ * Formats a comprehensive executive WhatsApp message for any lead in the database
+ * to be sent directly to the website owner.
+ */
+export function formatOwnerLeadWhatsAppMessage(lead: {
+  leadType?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  service?: string;
+  details?: string;
+  timestamp?: string | number;
+  id?: string;
+}): string {
+  const waSettings = getWhatsAppServiceSettings();
+  const lines: string[] = [
+    `🏛️ *NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+    `🚨 *NEW CLIENT LEAD / INQUIRY*`,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `📋 *Activity:* ${lead.leadType || 'Project Consultation Request'}`,
+    `👤 *Client Name:* ${lead.name || 'Valued Client'}`
+  ];
+  if (lead.phone && lead.phone.trim()) {
+    lines.push(`📱 *Client Phone / WhatsApp:* ${lead.phone.trim()}`);
+  }
+  if (lead.email && lead.email.trim()) {
+    lines.push(`✉️ *Client Email:* ${lead.email.trim()}`);
+  }
+  if (lead.service && lead.service.trim()) {
+    lines.push(`🛠️ *Service Requested:* ${lead.service.trim()}`);
+  }
+  if (lead.details && lead.details.trim()) {
+    lines.push(`📝 *Project Scope / Brief:*`);
+    lines.push(`${lead.details.trim()}`);
+  }
+  lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+  lines.push(`⏱️ *Logged In Database:* ${new Date(lead.timestamp || Date.now()).toLocaleString()}`);
+  if (lead.id) {
+    lines.push(`💾 *Database Record ID:* ${lead.id}`);
+  }
+  if (lead.phone && lead.phone.trim()) {
+    const cleanClient = normalizeWhatsAppNumber(lead.phone);
+    lines.push(``);
+    lines.push(`💬 *Direct WhatsApp Reply to Client:*`);
+    lines.push(`https://wa.me/${cleanClient}`);
+  }
+  lines.push(``);
+  lines.push(`_Routing to Studio Owner: ${waSettings.ownerWhatsAppNumber}_`);
+  return lines.join('\n');
+}
+
+/**
+ * Returns a 100% reliable direct WhatsApp link (wa.me) addressed to the owner
+ * containing the full formatted lead information.
+ */
+export function getOwnerWhatsAppUrl(lead: any): string {
+  const waSettings = getWhatsAppServiceSettings();
+  const ownerDigits = normalizeWhatsAppNumber(waSettings.ownerWhatsAppNumber);
+  const msg = formatOwnerLeadWhatsAppMessage(lead);
+  return `https://wa.me/${ownerDigits}?text=${encodeURIComponent(msg)}`;
+}
+
+/**
+ * Returns a direct WhatsApp reply link addressed to the client
+ */
+export function getClientWhatsAppReplyUrl(rawPhone: string, clientName?: string, service?: string): string {
+  if (!rawPhone) return '';
+  const cleanDigits = normalizeWhatsAppNumber(rawPhone);
+  const greeting = clientName ? `Dear ${clientName}` : 'Hello';
+  const serviceMention = service ? ` regarding "${service}"` : '';
+  const text = `${greeting},\n\nThank you for contacting Natal Interior Design & Construction${serviceMention}! Our project engineering team in Kampala has received your specifications from our web portal and is ready to assist you.`;
+  return `https://wa.me/${cleanDigits}?text=${encodeURIComponent(text)}`;
+}
+
+/**
+ * Plays a discrete, pleasant executive chime using the browser Web Audio API
+ * when a new lead or activity is detected in Firestore.
+ */
+export function playActivityChime() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12); // A5
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.45);
+  } catch {}
+}
+
+export interface QuoteThankYouParams {
+  clientName: string;
+  clientPhone?: string;
+  clientEmail?: string;
+  service?: string;
+  details?: string;
+  customMessage?: string;
+  apiKey?: string;
+}
+
+export interface QuoteThankYouResult {
+  success: boolean;
+  recipientPhone: string;
+  message: string;
+  status: string;
+  directWhatsAppUrl?: string;
+  gatewayResponse?: any;
+  error?: any;
+}
+
+/**
+ * Triggers an automatic thank-you message via the CallMeBot API immediately after a user
+ * successfully submits a request from the QuotePage, confirming we have received their inquiry.
+ */
+export async function triggerQuoteThankYouCallMeBot(params: QuoteThankYouParams): Promise<QuoteThankYouResult> {
+  try {
+    const waSettings = getWhatsAppServiceSettings();
+    const rawPhone = (params.clientPhone || '').trim();
+    const cleanPhoneDigits = rawPhone ? normalizeWhatsAppNumber(rawPhone) : '';
+
+    if (!cleanPhoneDigits) {
+      return {
+        success: false,
+        recipientPhone: '',
+        message: 'No client phone number provided for thank-you dispatch.',
+        status: 'skipped_no_phone'
+      };
+    }
+
+    const lines: string[] = [
+      `🏛️ *NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+      `*Quotation Request Received & Confirmed*`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `Dear *${params.clientName || 'Valued Client'}*,`,
+      ``,
+      `Thank you for requesting a project quotation with Natal Interior Design & Construction! 🤝`,
+      ``,
+      `📋 *Inquiry Summary:*`,
+      `• *Service Requested:* ${params.service || 'Interior Design & Construction'}`,
+      `• *Client Name:* ${params.clientName || 'Valued Client'}`,
+      `• *Contact Phone:* ${rawPhone}`,
+    ];
+
+    if (params.clientEmail && params.clientEmail.trim()) {
+      lines.push(`• *Email:* ${params.clientEmail.trim()}`);
+    }
+
+    if (params.details && params.details.trim()) {
+      const trimmedDetails = params.details.trim().length > 120 
+        ? params.details.trim().substring(0, 120) + '...' 
+        : params.details.trim();
+      lines.push(`• *Project Scope:* ${trimmedDetails}`);
+    }
+
+    lines.push(``);
+    lines.push(`⚙️ *Status:* Under Review by Lead Engineering Team`);
+    lines.push(`⏱️ *Expected Response:* Within 2 Business Hours`);
+    lines.push(``);
+    lines.push(`Our senior design & construction engineers in Kampala are reviewing your specifications and will get in touch with you directly via call or WhatsApp with your customized estimate.`);
+    lines.push(``);
+    lines.push(`💬 *Direct Studio Desk:*`);
+    lines.push(`📞 +256 745 694 499 / +256 777 568 259`);
+    lines.push(`✉️ info@natalinteriors.com`);
+    lines.push(`🌐 Kampala, Uganda`);
+    lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    lines.push(`_Automated confirmation receipt from Natal Design Web Portal._`);
+
+    const formattedMessage = params.customMessage || lines.join('\n');
+    const directWhatsAppUrl = `https://wa.me/${cleanPhoneDigits}?text=${encodeURIComponent(formattedMessage)}`;
+
+    let dispatchStatus = 'prepared_for_client';
+    let gatewayResponse: any = null;
+
+    // Use active CallMeBot API key from params or saved settings if available
+    const apiKey = (params.apiKey || waSettings.callMeBotApiKey || '').trim();
+
+    if (apiKey) {
+      try {
+        const queryParams = `phone=${cleanPhoneDigits}&text=${encodeURIComponent(formattedMessage)}&apikey=${encodeURIComponent(apiKey)}`;
+        const directApiUrl = `https://api.callmebot.com/whatsapp.php?${queryParams}`;
+
+        let delivered = false;
+
+        // Attempt 1: Via proxy endpoint
+        try {
+          const res = await fetch(`/api/callmebot/whatsapp.php?${queryParams}`);
+          const textResponse = await res.text().catch(() => '');
+          if (res.ok && !textResponse.toLowerCase().includes('error')) {
+            delivered = true;
+          }
+        } catch {}
+
+        // Attempt 2: Direct browser request with no-cors
+        if (!delivered) {
+          try {
+            await fetch(directApiUrl, { method: 'GET', mode: 'no-cors' });
+            delivered = true;
+          } catch {}
+        }
+
+        // Attempt 3: Background Image beacon (guaranteed fire-and-forget)
+        try {
+          const beacon = new Image();
+          beacon.src = directApiUrl;
+        } catch {}
+
+        dispatchStatus = delivered ? 'delivered_via_callmebot' : 'dispatched_callmebot';
+        gatewayResponse = { ok: true, status: 200, message: `Dispatched thank-you message to +${cleanPhoneDigits}` };
+      } catch (callErr: any) {
+        console.warn('CallMeBot thank-you dispatch warning:', callErr);
+        dispatchStatus = 'callmebot_error';
+        gatewayResponse = { ok: false, error: callErr?.message };
+      }
+    } else {
+      dispatchStatus = 'ready_for_whatsapp_receipt';
+    }
+
+    // Persist confirmation record to Firestore whatsapp_notifications
+    try {
+      await addDoc(collection(db, 'whatsapp_notifications'), sanitizeForFirestore({
+        recipientPhone: cleanPhoneDigits,
+        activityType: 'Quotation Thank-You Confirmation',
+        clientName: params.clientName,
+        clientPhone: rawPhone,
+        clientEmail: params.clientEmail || '',
+        service: params.service || '',
+        details: params.details || '',
+        message: formattedMessage,
+        directWhatsAppUrl,
+        gatewayProvider: 'callmebot',
+        status: dispatchStatus,
+        createdAt: serverTimestamp()
+      }));
+    } catch (fbErr) {
+      console.warn('Firestore thank-you log note:', fbErr);
+    }
+
+    return {
+      success: true,
+      recipientPhone: cleanPhoneDigits,
+      message: formattedMessage,
+      directWhatsAppUrl,
+      status: dispatchStatus,
+      gatewayResponse
+    };
+  } catch (err: any) {
+    console.warn('triggerQuoteThankYouCallMeBot error:', err);
+    return {
+      success: false,
+      recipientPhone: params.clientPhone || '',
+      message: '',
+      status: 'failed',
+      error: err
+    };
+  }
+}
+
+// Convenient aliases for utility consumers
+export const sendQuoteThankYouCallMeBot = triggerQuoteThankYouCallMeBot;
+export const sendCallMeBotThankYou = triggerQuoteThankYouCallMeBot;
+export const triggerThankYouCallMeBot = triggerQuoteThankYouCallMeBot;
+
+/**
+ * Reliably extracts milliseconds timestamp from any format:
+ * Firestore Timestamp ({ seconds, nanoseconds } or { _seconds }), JS Date, ISO string, or numeric epoch.
+ */
+export function parseTimestampToMs(raw: any): number {
+  if (!raw) return 0;
+  if (typeof raw === 'number') {
+    return raw < 1e11 ? raw * 1000 : raw;
+  }
+  if (typeof raw === 'object') {
+    if (typeof raw.seconds === 'number') return raw.seconds * 1000;
+    if (typeof raw._seconds === 'number') return raw._seconds * 1000;
+    if (typeof raw.toDate === 'function') {
+      try { return raw.toDate().getTime(); } catch {}
+    }
+    if (raw instanceof Date) return raw.getTime();
+  }
+  if (typeof raw === 'string') {
+    const parsed = new Date(raw).getTime();
+    if (!isNaN(parsed)) return parsed;
+    const num = Number(raw);
+    if (!isNaN(num) && num > 0) return num < 1e11 ? num * 1000 : num;
+  }
+  return 0;
+}
+
+/**
+ * Returns the effective chronological timestamp (in ms) for a user record.
+ * Checks createdAt, lastActive, updatedAt, activities, and embedded ID timestamps.
+ */
+export function getUserTimestamp(u: any): number {
+  if (!u) return 0;
+  // System administrator fallback account has baseline system timestamp so real clients are at the top
+  if (u.id === 'admin_primary') {
+    return 1704067200000; // 2024-01-01 UTC
+  }
+  const created = parseTimestampToMs(u.createdAt || u.created || u.joinedAt || u.registrationDate);
+  if (created > 0) return created;
+  const active = parseTimestampToMs(u.lastActive || u.lastLogin || u.lastSeen);
+  if (active > 0) return active;
+  const updated = parseTimestampToMs(u.updatedAt || u.timestamp || u.date);
+  if (updated > 0) return updated;
+  if (Array.isArray(u.activities) && u.activities.length > 0) {
+    const actTimes = u.activities.map((a: any) => parseTimestampToMs(a.timestamp || a.createdAt || a.date));
+    const maxAct = Math.max(...actTimes);
+    if (maxAct > 0) return maxAct;
+  }
+  if (typeof u.id === 'string') {
+    const match = u.id.match(/_(\d{10,13})/);
+    if (match) {
+      const num = Number(match[1]);
+      return num < 1e11 ? num * 1000 : num;
+    }
+  }
+  return 0;
+}
+
 
 

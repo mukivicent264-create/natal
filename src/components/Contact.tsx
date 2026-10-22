@@ -8,9 +8,15 @@ import {
   syncUserRecord, 
   recordUserActivity, 
   triggerOwnerEmailNotification,
+  triggerOwnerWhatsAppNotification,
+  getWhatsAppServiceSettings,
   sanitizeNameInput,
   isValidName,
   isValidEmail,
+  sanitizePhoneInput,
+  isValidPhone,
+  handlePhoneKeyDown,
+  handlePhonePaste,
   CONTAINS_DIGITS_OR_SYMBOLS_REGEX,
   handleNameKeyDown,
   handleNamePaste
@@ -22,13 +28,16 @@ export default function Contact() {
   const { content } = useSectionContent<ContactContent>('contact', defaultContactContent);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [message, setMessage] = useState('');
   const [nameError, setNameError] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
   const [messageError, setMessageError] = useState('');
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [directWhatsAppUrl, setDirectWhatsAppUrl] = useState('');
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;
@@ -47,6 +56,21 @@ export default function Contact() {
       setNameError('Please enter a valid full name (letters only, at least 2 characters).');
     } else {
       setNameError('');
+    }
+  };
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const clean = sanitizePhoneInput(e.target.value);
+    setPhone(clean);
+    if (phoneError) setPhoneError('');
+    if (formError) setFormError('');
+  };
+
+  const handlePhoneBlur = () => {
+    if (phone.trim() && !isValidPhone(phone)) {
+      setPhoneError('Please enter a valid phone number (at least 7 digits, e.g. +256 700 000 000).');
+    } else {
+      setPhoneError('');
     }
   };
 
@@ -95,6 +119,12 @@ export default function Contact() {
       return;
     }
 
+    if (phone.trim() && !isValidPhone(phone)) {
+      setPhoneError('Please enter a valid phone number (at least 7 digits).');
+      setFormError('Please enter a valid phone number.');
+      return;
+    }
+
     if (!message.trim() || message.trim().length < 5) {
       setMessageError('Please enter a message of at least 5 characters describing your project.');
       setFormError('Please enter your project message.');
@@ -104,29 +134,33 @@ export default function Contact() {
     const leadData = {
       name: name.trim(),
       email: email.trim(),
-      phone: '',
+      phone: phone.trim(),
       service: 'General Inquiry',
       details: message.trim(),
+      source: 'Contact Form',
       createdAt: new Date().toISOString()
     };
 
     setIsSubmitting(true);
     try {
+      let createdDocId = 'lead_' + Date.now();
       try {
-        await addDoc(collection(db, 'leads'), {
+        const docRef = await addDoc(collection(db, 'leads'), {
           ...leadData,
           createdAt: serverTimestamp()
         });
+        createdDocId = docRef.id;
       } catch (fbErr) {
         console.warn("Firestore leads sync error:", fbErr);
       }
 
       const currentLocal = JSON.parse(localStorage.getItem('natal_local_leads') || '[]');
-      localStorage.setItem('natal_local_leads', JSON.stringify([{ id: 'lead_' + Date.now(), ...leadData }, ...currentLocal]));
+      localStorage.setItem('natal_local_leads', JSON.stringify([{ id: createdDocId, ...leadData }, ...currentLocal]));
 
       await syncUserRecord({
         name: name.trim(),
         email: email.trim(),
+        phone: phone.trim(),
         source: 'Contact Form',
         service: 'General Inquiry',
         details: message.trim(),
@@ -138,25 +172,46 @@ export default function Contact() {
           description: `Submitted message: "${message.trim()}"`,
           metadata: {
             channel: 'Contact Form',
+            phone: phone.trim(),
             message: message.trim()
           }
         }
       });
 
-      // Automatically queue notification for Firebase Trigger Email Extension (owner inbox)
+      // Automatically queue notification for owner inbox and trigger WhatsApp notification
       triggerOwnerEmailNotification({
         leadType: 'Contact Form',
         name: name.trim(),
         email: email.trim(),
+        phone: phone.trim(),
         service: 'General Inquiry',
         details: message.trim()
       }).catch(mailErr => console.warn('Email trigger note:', mailErr));
 
+      triggerOwnerWhatsAppNotification({
+        leadType: 'Contact Form',
+        name: name.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        service: 'General Inquiry',
+        details: message.trim()
+      }).then(waRes => {
+        if (waRes?.directWhatsAppUrl) {
+          setDirectWhatsAppUrl(waRes.directWhatsAppUrl);
+        }
+      }).catch(waErr => console.warn('WhatsApp trigger note:', waErr));
+
+      // Dispatch global window events to immediately wake up notifications tab and users directory
+      window.dispatchEvent(new CustomEvent('natal_lead_submitted', { detail: { id: createdDocId, ...leadData } }));
+      window.dispatchEvent(new CustomEvent('natal_users_updated'));
+      window.dispatchEvent(new CustomEvent('natal_activity_recorded'));
+
       setSubmitted(true);
       setName('');
       setEmail('');
+      setPhone('');
       setMessage('');
-      setTimeout(() => setSubmitted(false), 5000);
+      setTimeout(() => setSubmitted(false), 12000);
     } catch (err) {
       console.error(err);
       setSubmitted(true);
@@ -188,12 +243,25 @@ export default function Contact() {
             className="bg-black-rich/50 backdrop-blur-md p-4 sm:p-6 border border-white/5 shadow-2xl"
           >
             {submitted ? (
-              <div className="py-8 text-center space-y-3 bg-black-pure/80 border border-gold/40 p-6">
+              <div className="py-8 text-center space-y-3 bg-black-pure/90 border border-gold/40 p-6">
                 <CheckCircle size={36} className="text-gold mx-auto" />
-                <h4 className="text-white font-heading text-lg font-bold uppercase tracking-wider">Message Received</h4>
+                <h4 className="text-white font-heading text-lg font-bold uppercase tracking-wider">Inquiry Received</h4>
                 <p className="text-gray-300 text-xs leading-relaxed max-w-sm mx-auto">
-                  Thank you for reaching out. Your project inquiry has been saved directly to our client portal. Our master designers will get back to you shortly.
+                  Thank you for reaching out. Your project inquiry has been recorded and an executive notification has been dispatched to the studio owner's WhatsApp and email.
                 </p>
+                {directWhatsAppUrl && (
+                  <div className="pt-2 max-w-sm mx-auto">
+                    <a
+                      href={directWhatsAppUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold uppercase tracking-wider text-xs transition-all shadow-md rounded-sm"
+                    >
+                      <MessageSquare size={14} />
+                      <span>👉 Chat on WhatsApp With Studio Owner ({getWhatsAppServiceSettings().ownerWhatsAppNumber})</span>
+                    </a>
+                  </div>
+                )}
               </div>
             ) : (
               <form className="space-y-3 sm:space-y-3.5" onSubmit={handleSubmit}>
@@ -247,6 +315,33 @@ export default function Contact() {
                   {emailError && (
                     <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1">
                       <span>⚠</span> {emailError}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label htmlFor="phone" className="block text-[11px] uppercase tracking-wider text-gray-400 font-semibold flex items-center justify-between">
+                      <span>Phone / WhatsApp (Optional)</span>
+                      <span className="text-gold text-[9px] lowercase font-mono">For instant WhatsApp updates</span>
+                    </label>
+                  </div>
+                  <input 
+                    type="tel" 
+                    id="phone" 
+                    value={phone}
+                    onChange={handlePhoneChange}
+                    onKeyDown={(e) => handlePhoneKeyDown(e, setPhoneError)}
+                    onPaste={(e) => handlePhonePaste(e, setPhone, setPhoneError)}
+                    onBlur={handlePhoneBlur}
+                    inputMode="tel"
+                    autoComplete="tel"
+                    className={`w-full bg-white/[0.03] border ${phoneError ? 'border-red-500/80 focus:border-red-500' : 'border-white/10 focus:border-gold/50'} text-white px-3.5 py-2.5 text-sm focus:outline-none focus:bg-white/[0.05] transition-colors`}
+                    placeholder="e.g. +256 700 000 000"
+                  />
+                  {phoneError && (
+                    <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1">
+                      <span>⚠</span> {phoneError}
                     </p>
                   )}
                 </div>

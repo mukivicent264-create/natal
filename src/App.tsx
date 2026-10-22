@@ -24,9 +24,11 @@ import { Project } from './types';
 import { projectsData } from './data';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
-import { seedInitialDatabaseIfEmpty } from './utils';
+import { seedInitialDatabaseIfEmpty, initCommunicationSettingsSync } from './utils';
+import { useNatalTheme } from './theme';
 
 export default function App() {
+  useNatalTheme();
   const [isAuthPage, setIsAuthPage] = useState(false);
   const [isQuotePage, setIsQuotePage] = useState(false);
   const [isCreationsPage, setIsCreationsPage] = useState(false);
@@ -35,11 +37,12 @@ export default function App() {
   const [isSpecsPage, setIsSpecsPage] = useState(false);
   const [specsProject, setSpecsProject] = useState<Project | null>(null);
 
-  // Automatically initialize database with baseline records if collections are empty
+  // Automatically initialize database with baseline records and sync communication settings
   useEffect(() => {
     seedInitialDatabaseIfEmpty().catch((err) => {
       console.warn("Database initialization check:", err);
     });
+    initCommunicationSettingsSync();
   }, []);
 
   // Sync state with window hash for bookmarking & browser navigation

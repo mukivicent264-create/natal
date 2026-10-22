@@ -5,13 +5,17 @@ import {
   UserCheck, LayoutGrid, List, Table, ChevronRight, ChevronDown,
   ArrowUpDown, SlidersHorizontal, CheckSquare, Eye, ShieldCheck,
   Zap, Clock, Activity, MessageSquare, PlusCircle, ExternalLink,
-  History, ArrowRight, CornerDownRight, Tag, Layers, Camera, Edit2, Edit3, Save
+  History, ArrowRight, CornerDownRight, Tag, Layers, Camera, Edit2, Edit3, Save,
+  AlertCircle
 } from 'lucide-react';
+import { ExportButton } from './ExportButton';
+import { ExportColumn } from '../utils/exportUtils';
 import { 
   recordUserActivity, 
   UserActivity, 
   getUserInitials, 
   compressImageFile,
+  normalizeWhatsAppNumber,
   sanitizeNameInput,
   isValidName,
   sanitizePhoneInput,
@@ -20,7 +24,10 @@ import {
   handleNamePaste,
   handlePhoneKeyDown,
   handlePhonePaste,
-  CONTAINS_DIGITS_OR_SYMBOLS_REGEX
+  CONTAINS_DIGITS_OR_SYMBOLS_REGEX,
+  getUserTimestamp,
+  parseTimestampToMs,
+  showAppNotification
 } from '../utils';
 
 const SOURCE_FILTER_OPTIONS = [
@@ -191,12 +198,12 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
     if (!selectedUserDetail || !editName.trim()) return;
 
     if (!isValidName(editName)) {
-      setUserModalNotice("⚠ Error: Name must contain letters only (no numbers, digits or symbols).");
+      setUserModalNotice("Error: Name must contain letters only (no numbers, digits or symbols).");
       return;
     }
 
     if (editPhone.trim() && !isValidPhone(editPhone)) {
-      setUserModalNotice("⚠ Error: Please enter a valid phone number (at least 7 digits).");
+      setUserModalNotice("Error: Please enter a valid phone number (at least 7 digits).");
       return;
     }
 
@@ -220,7 +227,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
       setUserModalNotice("Profile details saved and synchronized across Navigation Bar & Dashboard!");
       setTimeout(() => setUserModalNotice(''), 4000);
     } catch (err: any) {
-      alert("Error saving profile changes: " + err.message);
+      showAppNotification("Error saving profile changes: " + err.message, "error");
     } finally {
       setIsSavingUserEdit(false);
     }
@@ -295,12 +302,12 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
     if (!name.trim() || !email.trim()) return;
 
     if (!isValidName(name)) {
-      alert("Error: Client name must contain letters only (no numbers, digits or symbols).");
+      showAppNotification("Error: Client name must contain letters only (no numbers, digits or symbols).", "error");
       return;
     }
 
     if (phone.trim() && !isValidPhone(phone)) {
-      alert("Error: Please enter a valid phone number (at least 7 digits).");
+      showAppNotification("Error: Please enter a valid phone number (at least 7 digits).", "error");
       return;
     }
 
@@ -329,7 +336,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
       setProjectType(PROPERTY_TYPE_OPTIONS[0]);
       setEstimatedBudget(BUDGET_OPTIONS[1]);
     } catch (err: any) {
-      alert("Error adding user: " + err.message);
+      showAppNotification("Error adding user: " + err.message, "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -372,23 +379,33 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
         return (b.name || '').localeCompare(a.name || '');
       }
       
-      const getTime = (item: any) => {
-        if (item.createdAt?.seconds) return item.createdAt.seconds * 1000;
-        if (typeof item.createdAt === 'string') {
-          const t = new Date(item.createdAt).getTime();
-          return isNaN(t) ? 0 : t;
-        }
-        return 0;
-      };
-
-      const timeA = getTime(a);
-      const timeB = getTime(b);
+      const timeA = getUserTimestamp(a);
+      const timeB = getUserTimestamp(b);
 
       if (sortOption === 'oldest') {
         return timeA - timeB;
       }
-      // Default: 'newest'
-      return timeB - timeA;
+
+      // Default: 'newest' -> Newest registered client / user is guaranteed at the very top of the list!
+      const isAdminA = a.role === 'Administrator' || a.isAdmin || (a.email && a.email.toLowerCase().includes('admin'));
+      const isAdminB = b.role === 'Administrator' || b.isAdmin || (b.email && b.email.toLowerCase().includes('admin'));
+
+      // Real client / new users are always placed above system administrators
+      if (!isAdminA && isAdminB) return -1;
+      if (isAdminA && !isAdminB) return 1;
+
+      // Between clients (or between admins), newest user is first at the top
+      if (timeB !== timeA) {
+        return timeB - timeA;
+      }
+
+      // If timestamps tie, place VIP client first
+      const isVipA = a.role === 'VIP Client' || a.source === 'Registration' || a.isVIP;
+      const isVipB = b.role === 'VIP Client' || b.source === 'Registration' || b.isVIP;
+      if (isVipA && !isVipB) return -1;
+      if (!isVipA && isVipB) return 1;
+
+      return 0;
     });
   }, [users, searchTerm, sourceFilter, roleFilter, sortOption]);
 
@@ -549,7 +566,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
       setNoteDesc('');
       setIsAddingNote(false);
     } catch (err: any) {
-      alert("Error adding activity note: " + err.message);
+      showAppNotification("Error adding activity note: " + err.message, "error");
     } finally {
       setIsSubmittingNote(false);
     }
@@ -577,14 +594,35 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
             <span>Activity Stream ({totalActivitiesCount})</span>
           </button>
 
-          <button
-            onClick={onExportCSV}
-            className="px-3.5 py-2.5 bg-black-pure border border-gold/40 text-gold hover:bg-gold/10 hover:border-gold transition-all text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-[0.98]"
-            title="Export User Directory to CSV spreadsheet"
-          >
-            <Download size={14} /> 
-            <span>Export CSV</span>
-          </button>
+          {/* Export Button: PDF Report & Editable CSV/Excel/JSON */}
+          <ExportButton
+            data={users}
+            columns={[
+              { header: 'Full Name', key: 'name' },
+              { header: 'Email Address', key: 'email' },
+              { header: 'Phone Number', key: 'phone' },
+              { header: 'Role / Status', key: 'role', format: (u: any) => u.role || 'Member' },
+              { header: 'Source / Channel', key: 'source', format: (u: any) => u.source || 'Direct' },
+              { header: 'Service Interest', key: 'service', format: (u: any) => u.service || '-' },
+              { header: 'Project Details', key: 'details', format: (u: any) => u.details || '-' },
+              { 
+                header: 'Registered Date', 
+                key: 'createdAt', 
+                format: (u: any) => u.createdAt ? (typeof u.createdAt === 'string' ? u.createdAt : new Date(u.createdAt?.seconds ? u.createdAt.seconds * 1000 : Date.now()).toLocaleDateString()) : 'Recent' 
+              }
+            ]}
+            title="Natal Atelier - User & Client Directory"
+            subtitle="Complete roster of registered VIP clients, leads, and administrators"
+            category="Directory & CRM"
+            filenamePrefix="natal_users_roster"
+            summaryCards={[
+              { label: 'Total Clients', value: users.length },
+              { label: 'VIP Clients', value: users.filter(u => u.role === 'VIP Client' || u.isVIP).length },
+              { label: 'Leads', value: users.filter(u => u.role === 'Client Lead' || u.source === 'Quotation Form').length },
+              { label: 'Admins', value: users.filter(u => u.role === 'Administrator').length }
+            ]}
+            buttonLabel="Export Directory"
+          />
           
           <button
             onClick={() => setIsAddModalOpen(true)}
@@ -611,14 +649,14 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
         </div>
       )}
 
-      {/* KPI Metric Cards in responsive 5-column layout */}
+      {/* KPI Metric Cards in responsive 5-column layout - Unified Luxury Surface */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
         {/* Card 1: Total Directory */}
-        <div className="bg-black-pure border border-gold/30 hover:border-gold/60 p-3 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
+        <div className="bg-[#0f0f0f] border border-white/10 hover:border-gold/30 rounded-sm p-3.5 sm:p-5 relative overflow-hidden select-none shadow-sm transition-all flex flex-col justify-between group">
           <div>
             <div className="flex items-center justify-between text-gray-400 text-[10px] sm:text-[11px] font-mono uppercase tracking-wider">
               <span className="truncate pr-1 font-medium text-gray-300">Total Directory</span>
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded bg-gold/10 border border-gold/30 flex items-center justify-center text-gold shrink-0 group-hover:scale-105 transition-transform">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded bg-white/5 border border-white/10 flex items-center justify-center text-gold shrink-0">
                 <Users size={15} />
               </div>
             </div>
@@ -628,37 +666,36 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               </div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 {adminCount > 0 && (
-                  <span className="text-[9px] sm:text-[10px] font-mono text-purple-300 bg-purple-950/80 border border-purple-500/50 px-2 py-0.5 rounded shrink-0 font-semibold flex items-center gap-1 shadow-sm">
-                    <ShieldCheck size={10} className="text-purple-400" />
+                  <span className="text-[9px] sm:text-[10px] font-mono text-gray-300 bg-white/5 border border-white/10 px-2 py-0.5 rounded shrink-0 font-semibold flex items-center gap-1 shadow-sm">
+                    <ShieldCheck size={10} className="text-gold" />
                     {adminCount} {adminCount === 1 ? 'Admin' : 'Admins'}
                   </span>
                 )}
-                <span className="text-[9px] sm:text-[10px] font-mono text-gold bg-gold/10 border border-gold/30 px-2 py-0.5 rounded shrink-0 font-semibold">
+                <span className="text-[9px] sm:text-[10px] font-mono text-gold bg-white/5 border border-white/10 px-2 py-0.5 rounded shrink-0 font-semibold">
                   Profiles
                 </span>
               </div>
             </div>
             <div className="text-[10px] sm:text-[11px] text-gray-400 font-mono mt-1.5 truncate">
-              {adminCount > 0 ? `${adminCount} Administrators • ${registrationCount} Clients` : 'Aggregated user directory'}
+              {adminCount > 0 ? `${adminCount} Administrators · ${registrationCount} Clients` : 'Aggregated user directory'}
             </div>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-gold-dark via-gold to-gold-light"></div>
         </div>
 
         {/* Card 2: Recorded User Activities */}
-        <div className="bg-black-pure border border-amber-400/40 hover:border-amber-400/80 p-3 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
+        <div className="bg-[#0f0f0f] border border-white/10 hover:border-gold/30 rounded-sm p-3.5 sm:p-5 relative overflow-hidden select-none shadow-sm transition-all flex flex-col justify-between group">
           <div>
             <div className="flex items-center justify-between text-gray-400 text-[10px] sm:text-[11px] font-mono uppercase tracking-wider">
               <span className="truncate pr-1 font-medium text-gray-300">User Activities</span>
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 shrink-0 group-hover:scale-105 transition-transform">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded bg-white/5 border border-white/10 flex items-center justify-center text-gold shrink-0">
                 <Zap size={15} />
               </div>
             </div>
             <div className="flex items-baseline justify-between mt-3 sm:mt-4 gap-1 flex-wrap">
-              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold font-mono text-amber-300 tracking-tight">
+              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold font-mono text-white tracking-tight">
                 {totalActivitiesCount}
               </div>
-              <span className="text-[9px] sm:text-[10px] font-mono text-amber-400 bg-amber-400/10 border border-amber-400/30 px-2 py-0.5 rounded shrink-0 font-semibold">
+              <span className="text-[9px] sm:text-[10px] font-mono text-gold bg-white/5 border border-white/10 px-2 py-0.5 rounded shrink-0 font-semibold">
                 Recorded
               </span>
             </div>
@@ -666,23 +703,22 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               Live audit & action trail
             </div>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-200"></div>
         </div>
 
         {/* Card 3: VIP Registrations */}
-        <div className="bg-black-pure border border-white/10 hover:border-amber-400/40 p-3 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
+        <div className="bg-[#0f0f0f] border border-white/10 hover:border-gold/30 rounded-sm p-3.5 sm:p-5 relative overflow-hidden select-none shadow-sm transition-all flex flex-col justify-between group">
           <div>
             <div className="flex items-center justify-between text-gray-400 text-[10px] sm:text-[11px] font-mono uppercase tracking-wider">
               <span className="truncate pr-1 font-medium text-gray-300">VIP Accounts</span>
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 shrink-0 group-hover:scale-105 transition-transform">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded bg-white/5 border border-white/10 flex items-center justify-center text-gold shrink-0">
                 <Sparkles size={15} />
               </div>
             </div>
             <div className="flex items-baseline justify-between mt-3 sm:mt-4 gap-1 flex-wrap">
-              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold font-mono text-gold tracking-tight">
+              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold font-mono text-white tracking-tight">
                 {registrationCount}
               </div>
-              <span className="text-[9px] sm:text-[10px] font-mono text-amber-400 bg-amber-400/10 border border-amber-400/30 px-2 py-0.5 rounded shrink-0 font-semibold">
+              <span className="text-[9px] sm:text-[10px] font-mono text-gold bg-white/5 border border-white/10 px-2 py-0.5 rounded shrink-0 font-semibold">
                 {totalProfilesCount > 0 ? Math.round((registrationCount / totalProfilesCount) * 100) : 0}% Share
               </span>
             </div>
@@ -690,23 +726,22 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               Registered VIP members
             </div>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-400"></div>
         </div>
 
         {/* Card 4: Quotation Forms */}
-        <div className="bg-black-pure border border-white/10 hover:border-emerald-400/40 p-3 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
+        <div className="bg-[#0f0f0f] border border-white/10 hover:border-gold/30 rounded-sm p-3.5 sm:p-5 relative overflow-hidden select-none shadow-sm transition-all flex flex-col justify-between group">
           <div>
             <div className="flex items-center justify-between text-gray-400 text-[10px] sm:text-[11px] font-mono uppercase tracking-wider">
               <span className="truncate pr-1 font-medium text-gray-300">Scope Quotes</span>
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 group-hover:scale-105 transition-transform">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded bg-white/5 border border-white/10 flex items-center justify-center text-gold shrink-0">
                 <FileText size={15} />
               </div>
             </div>
             <div className="flex items-baseline justify-between mt-3 sm:mt-4 gap-1 flex-wrap">
-              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold font-mono text-emerald-400 tracking-tight">
+              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold font-mono text-white tracking-tight">
                 {quoteCount}
               </div>
-              <span className="text-[9px] sm:text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded shrink-0 font-semibold">
+              <span className="text-[9px] sm:text-[10px] font-mono text-emerald-400 bg-white/5 border border-white/10 px-2 py-0.5 rounded shrink-0 font-semibold">
                 {totalProfilesCount > 0 ? Math.round((quoteCount / totalProfilesCount) * 100) : 0}% Share
               </span>
             </div>
@@ -714,23 +749,22 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               Submitted project scopes
             </div>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-400"></div>
         </div>
 
         {/* Card 5: Contact Forms / Inquiries */}
-        <div className="bg-black-pure border border-white/10 hover:border-blue-400/40 p-3 sm:p-5 relative overflow-hidden select-none shadow-lg transition-all flex flex-col justify-between group">
+        <div className="bg-[#0f0f0f] border border-white/10 hover:border-gold/30 rounded-sm p-3.5 sm:p-5 relative overflow-hidden select-none shadow-sm transition-all flex flex-col justify-between group">
           <div>
             <div className="flex items-center justify-between text-gray-400 text-[10px] sm:text-[11px] font-mono uppercase tracking-wider">
               <span className="truncate pr-1 font-medium text-gray-300">Direct Messages</span>
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded bg-blue-400/10 border border-blue-400/30 flex items-center justify-center text-blue-300 shrink-0 group-hover:scale-105 transition-transform">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded bg-white/5 border border-white/10 flex items-center justify-center text-gold shrink-0">
                 <Mail size={15} />
               </div>
             </div>
             <div className="flex items-baseline justify-between mt-3 sm:mt-4 gap-1 flex-wrap">
-              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold font-mono text-blue-300 tracking-tight">
+              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold font-mono text-white tracking-tight">
                 {effectiveContactCount}
               </div>
-              <span className="text-[9px] sm:text-[10px] font-mono text-blue-400 bg-blue-400/10 border border-blue-400/30 px-2 py-0.5 rounded shrink-0 font-semibold">
+              <span className="text-[9px] sm:text-[10px] font-mono text-gray-300 bg-white/5 border border-white/10 px-2 py-0.5 rounded shrink-0 font-semibold">
                 {totalProfilesCount > 0 ? Math.round((effectiveContactCount / totalProfilesCount) * 100) : 0}% Share
               </span>
             </div>
@@ -738,12 +772,83 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               Consultation inquiries
             </div>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400"></div>
         </div>
       </div>
 
-      {/* Control Bar: Search, Filter Tabs, Sort Option, View Switcher */}
-      <div className="bg-black-pure border border-gold/30 p-3 sm:p-5 space-y-4 shadow-xl">
+      {/* Control Bar: Quick Filter Tabs, Search, Filter Dropdowns, Sort, View Switcher */}
+      <div className="bg-black-pure border border-gold/30 rounded-sm p-3.5 sm:p-5 space-y-4 shadow-xl">
+        {/* Quick Category Filter Pills (Matching Notification Tabs Format) */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+          <button
+            type="button"
+            onClick={() => { setSourceFilter('all'); setRoleFilter('all'); }}
+            className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              sourceFilter === 'all' && roleFilter === 'all'
+                ? 'bg-gold text-black-pure font-bold shadow-sm'
+                : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5'
+            }`}
+          >
+            <span>All Profiles</span>
+            <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none bg-red-600 text-white shadow-sm shrink-0 border-0 outline-none ring-0">{users.length}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { setRoleFilter('VIP Client'); setSourceFilter('all'); }}
+            className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              roleFilter === 'VIP Client'
+                ? 'bg-gold text-black-pure font-bold shadow-sm'
+                : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5'
+            }`}
+          >
+            <Sparkles size={12} />
+            <span>VIP Clients</span>
+            <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none bg-red-600 text-white shadow-sm shrink-0 border-0 outline-none ring-0">{registrationCount}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { setSourceFilter('Quotation Form'); setRoleFilter('all'); }}
+            className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              sourceFilter === 'Quotation Form'
+                ? 'bg-gold text-black-pure font-bold shadow-sm'
+                : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5'
+            }`}
+          >
+            <FileText size={12} />
+            <span>Quote Leads</span>
+            <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none bg-red-600 text-white shadow-sm shrink-0 border-0 outline-none ring-0">{quoteCount}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { setSourceFilter('Contact Form'); setRoleFilter('all'); }}
+            className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              sourceFilter === 'Contact Form'
+                ? 'bg-gold text-black-pure font-bold shadow-sm'
+                : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5'
+            }`}
+          >
+            <Mail size={12} />
+            <span>Inquiries</span>
+            <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none bg-red-600 text-white shadow-sm shrink-0 border-0 outline-none ring-0">{effectiveContactCount}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { setRoleFilter('Administrator'); setSourceFilter('all'); }}
+            className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              roleFilter === 'Administrator'
+                ? 'bg-gold text-black-pure font-bold shadow-sm'
+                : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5'
+            }`}
+          >
+            <ShieldCheck size={12} />
+            <span>Administrators</span>
+            <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none bg-red-600 text-white shadow-sm shrink-0 border-0 outline-none ring-0">{adminCount}</span>
+          </button>
+        </div>
+
         <div className="flex flex-col lg:flex-row gap-3.5 items-stretch lg:items-center justify-between">
           {/* Search Field Matching Website Signature Design */}
           <div className="relative flex-1 min-w-[280px]">
@@ -957,14 +1062,14 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
 
       {/* EMPTY STATE */}
       {filteredUsers.length === 0 ? (
-        <div className="p-12 sm:p-16 text-center bg-black-pure border border-gold/30 shadow-xl">
-          <div className="w-16 h-16 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center mx-auto mb-4 text-gold/60">
-            <UserCheck size={32} />
+        <div className="bg-black-pure border border-gold/20 p-10 sm:p-14 text-center rounded-sm shadow-xl text-gray-400">
+          <div className="w-14 h-14 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center mx-auto mb-3 text-gold/60">
+            <Users size={28} />
           </div>
-          <h3 className="text-base sm:text-lg font-heading text-white uppercase tracking-wider">
+          <h3 className="text-base font-heading text-white uppercase tracking-wider font-bold">
             No Matching Client Records Found
           </h3>
-          <p className="text-xs text-gray-400 mt-1 max-w-md mx-auto leading-relaxed">
+          <p className="text-xs text-gray-400 mt-1.5 max-w-md mx-auto leading-relaxed">
             {users.length === 0 
               ? "Clients who register an account, request a quote, or send a contact message are automatically compiled here in real time."
               : "No clients matched your active filter or search query. Reset filters to review the full directory."}
@@ -973,204 +1078,227 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
             {users.length === 0 ? (
               <button
                 onClick={() => setIsAddModalOpen(true)}
-                className="px-5 py-2.5 bg-gradient-to-r from-gold-dark via-gold to-gold-light hover:brightness-110 text-black-pure font-bold text-xs uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer shadow-md"
+                className="px-4 py-2 bg-gradient-to-r from-gold-dark via-gold to-gold-light hover:brightness-110 text-black-pure font-bold text-xs uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer shadow-md rounded-sm"
               >
                 <UserPlus size={14} /> Add First Client
               </button>
             ) : (
               <button
-                onClick={() => { setSearchTerm(''); setSourceFilter('all'); setRoleFilter('all'); }}
-                className="px-4 py-2 border border-gold/50 text-gold hover:bg-gold/10 text-xs font-mono uppercase tracking-wider inline-block cursor-pointer transition-colors"
+                onClick={() => { setSearchTerm(''); setSourceFilter('all'); setRoleFilter('all'); setSortOption('newest'); }}
+                className="px-3.5 py-1.5 text-xs font-mono uppercase tracking-wider text-gold hover:text-white border border-gold/30 hover:border-gold rounded-sm transition-all cursor-pointer"
               >
-                Show All {users.length} Profiles
+                Reset Filters
               </button>
             )}
           </div>
         </div>
       ) : viewMode === 'list' ? (
-        /* LIST FORMAT (Default: Comprehensive Horizontal Detail Rows) */
-        <div className="space-y-3 font-sans">
-          {filteredUsers.map((u, uIdx) => {
-            const initials = getUserInitials(u.name, u.email);
-            const isCopied = copiedEmail === u.email;
-            const isAdminItem = u.role === 'Administrator' || (u.email && u.email.toLowerCase().includes('admin'));
-            const isVIPItem = !isAdminItem && (u.role === 'VIP Client' || u.source === 'Registration');
+        /* LIST FORMAT (Executive Feed Format - Matched to Notifications Stream Design) */
+        <div className="bg-black-pure border border-gold/30 p-4 sm:p-6 lg:p-7 rounded-sm shadow-xl space-y-3 font-sans">
+          <div className="flex items-center justify-between pb-3 border-b border-white/10 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Users size={16} className="text-gold" />
+              <h3 className="text-sm font-heading uppercase tracking-widest text-gold font-bold">
+                Client Directory Feed ({filteredUsers.length})
+              </h3>
+            </div>
+            <div className="flex items-center gap-2 font-mono text-xs flex-wrap">
+              <span className="text-gray-400">Total:</span>
+              <span className="text-gold font-bold">{users.length} Profiles</span>
+              {adminCount > 0 && (
+                <span className="text-purple-300 font-mono text-[10px] px-2 py-0.5 bg-purple-950/80 border border-purple-500/50 rounded-full flex items-center gap-1">
+                  <ShieldCheck size={10} className="text-purple-400" />
+                  {adminCount} Admin{adminCount > 1 ? 's' : ''}
+                </span>
+              )}
+              {registrationCount > 0 && (
+                <span className="text-gold font-mono text-[10px] px-2 py-0.5 bg-gold/15 border border-gold/30 rounded-full flex items-center gap-1">
+                  <Sparkles size={10} className="text-gold" />
+                  {registrationCount} VIP
+                </span>
+              )}
+            </div>
+          </div>
 
-            return (
-              <div 
-                key={u.id || u.email || `usr_list_${uIdx}`}
-                onClick={() => handleOpenUserDetail(u)}
-                className="bg-black-pure border border-gold/30 hover:border-gold transition-all duration-200 p-3 sm:p-5 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4 group shadow-md hover:shadow-[0_10px_30px_rgba(0,0,0,0.85)] relative overflow-hidden cursor-pointer"
-              >
-                {/* Left accent strip */}
-                <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${
-                  isAdminItem ? 'bg-purple-500' : isVIPItem ? 'bg-gold' : 'bg-emerald-500'
-                }`} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredUsers.map((u, uIdx) => {
+              const initials = getUserInitials(u.name, u.email);
+              const isCopied = copiedEmail === u.email;
+              const isAdminItem = u.role === 'Administrator' || (u.email && u.email.toLowerCase().includes('admin'));
+              const isVIPItem = !isAdminItem && (u.role === 'VIP Client' || u.source === 'Registration');
+              const userTimestamp = getUserTimestamp(u);
+              const isRecentUser = !isAdminItem && (userTimestamp > 0 ? (Date.now() - userTimestamp < 7 * 24 * 3600 * 1000) : (uIdx === 0 && !isAdminItem));
 
-                {/* Main Client Identity */}
-                <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1 pl-1">
-                  <div className="relative shrink-0">
-                    <div className={`w-11 h-11 rounded-full font-bold font-serif flex items-center justify-center text-sm shadow-md overflow-hidden ${
-                      isAdminItem
-                        ? 'bg-purple-950/80 border-2 border-purple-400 text-purple-200'
-                        : isVIPItem
-                        ? 'bg-gold/15 border-2 border-gold text-gold shadow-[0_0_12px_rgba(212,175,55,0.3)]'
-                        : 'bg-emerald-950/70 border border-emerald-500/50 text-emerald-300'
-                    }`}>
-                      {u.photoURL ? (
-                        <img src={u.photoURL} alt={u.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <span>{initials || (isAdminItem ? 'ADM' : 'VIP')}</span>
-                      )}
-                    </div>
-                    {/* Active pulse */}
-                    <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure"></span>
-                    </span>
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm sm:text-base font-bold text-white group-hover:text-gold transition-colors truncate">
-                        {u.name || 'Anonymous Client'}
-                      </h3>
-                      
-                      {/* Role Pill */}
-                      {isAdminItem ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-purple-950/80 text-purple-300 border border-purple-500/60 flex items-center gap-1 font-bold">
-                          <ShieldCheck size={11} className="text-purple-400" />
-                          Administrator
+              return (
+                <div 
+                  key={u.id || u.email || `usr_list_${uIdx}`}
+                  className="p-4 sm:p-5 rounded-sm border border-white/10 bg-[#0f0f0f] hover:border-gold/30 hover:bg-[#141414] transition-all duration-200 flex flex-col justify-between"
+                >
+                  <div className="flex flex-col justify-between gap-4 h-full">
+                    {/* Left & Middle Column: Avatar, Name, Badges, Details, Contacts */}
+                    <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                      {/* Profile Avatar / Category Badge */}
+                      <div className="relative shrink-0 mt-0.5">
+                        <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full shrink-0 flex items-center justify-center border font-bold font-serif text-xs overflow-hidden ${
+                          isAdminItem 
+                            ? 'bg-white/5 border-gold/40 text-gold' 
+                            : isVIPItem 
+                            ? 'bg-white/5 border-gold/40 text-gold' 
+                            : 'bg-white/5 border-white/15 text-gray-300'
+                        }`}>
+                          {u.photoURL ? (
+                            <img src={u.photoURL} alt={u.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <span>{initials || (isAdminItem ? 'ADM' : 'VIP')}</span>
+                          )}
+                        </div>
+                        {/* Circular Live Dot at bottom of profile avatar */}
+                        <span className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center pointer-events-none" title="Live Profile">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500 border border-black-pure shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span>
                         </span>
-                      ) : isVIPItem ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-gold/15 text-gold border border-gold/40 flex items-center gap-1 font-bold shadow-[0_0_10px_rgba(212,175,55,0.25)]">
-                          <Sparkles size={11} className="text-gold" />
-                          VIP Client
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-emerald-950/70 text-emerald-400 border border-emerald-500/40 font-semibold">
-                          Client Lead
-                        </span>
-                      )}
-
-                      {/* Source tag */}
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-black-rich border border-white/10 text-gray-400 flex items-center gap-1">
-                        {u.source === 'Registration' && <Sparkles size={10} className="text-amber-400" />}
-                        {u.source === 'Quotation Form' && <FileText size={10} className="text-emerald-400" />}
-                        {u.source === 'Contact Form' && <Mail size={10} className="text-blue-400" />}
-                        <span>{u.source === 'Registration' ? 'VIP Registration' : (u.source || 'Quotation Form')}</span>
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-[11px] font-mono text-gray-400 mt-1 flex-wrap">
-                      <span>Joined: {formatDate(u.createdAt)}</span>
-                      {u.service && (
-                        <>
-                          <span className="text-gray-600">•</span>
-                          <span className="text-gold truncate max-w-[260px]">
-                            {u.service}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Listed User Info & Contact Details (List Format) */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full xl:w-auto min-w-[280px] max-w-xl" onClick={(e) => e.stopPropagation()}>
-                  {/* Email Detail Row */}
-                  <div className="flex-1 p-2.5 bg-black-rich border border-white/10 hover:border-gold/30 transition-colors">
-                    <div className="flex items-center justify-between text-[9px] font-mono uppercase tracking-wider text-gray-400 mb-0.5">
-                      <span className="flex items-center gap-1.5">
-                        <Mail size={11} className="text-gold" />
-                        <span>Email Address</span>
-                      </span>
-                      {isCopied && <span className="text-emerald-400 text-[9px] font-bold">Copied!</span>}
-                    </div>
-                    {u.email ? (
-                      <div className="flex items-center justify-between gap-1 text-[11px] font-mono text-white">
-                        <a href={`mailto:${u.email}`} className="hover:text-gold transition-colors truncate max-w-[170px]" title={u.email}>
-                          {u.email}
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyEmail(u.email)}
-                          className="text-gray-400 hover:text-gold p-1 cursor-pointer transition-colors"
-                          title="Copy email to clipboard"
-                        >
-                          {isCopied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                        </button>
                       </div>
-                    ) : (
-                      <span className="text-[11px] text-gray-600 italic">Not provided</span>
-                    )}
-                  </div>
 
-                  {/* Phone & WhatsApp Detail Row */}
-                  <div className="flex-1 p-2.5 bg-black-rich border border-white/10 hover:border-gold/30 transition-colors">
-                    <div className="flex items-center justify-between text-[9px] font-mono uppercase tracking-wider text-gray-400 mb-0.5">
-                      <span className="flex items-center gap-1.5">
-                        <Phone size={11} className="text-gold" />
-                        <span>Phone / WhatsApp</span>
-                      </span>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        {/* Name & Badges */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 
+                            onClick={() => handleOpenUserDetail(u)}
+                            className="text-sm font-semibold text-white tracking-wide truncate hover:text-gold transition-colors cursor-pointer"
+                          >
+                            {u.name || 'Anonymous Client'}
+                          </h4>
+
+                          {isRecentUser && (
+                            <span className="text-[9px] font-mono px-2 py-0.5 bg-gradient-to-r from-gold-dark via-gold to-yellow-300 text-black-pure font-bold rounded shadow-[0_0_10px_rgba(212,175,55,0.45)] inline-flex items-center gap-1 uppercase tracking-wider animate-pulse">
+                              <Sparkles size={9} /> NEW USER
+                            </span>
+                          )}
+
+                          {/* Role badge */}
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border inline-flex items-center gap-1 font-semibold ${
+                            isAdminItem
+                              ? 'bg-purple-950/80 text-purple-300 border-purple-500/60 shadow-[0_0_8px_rgba(168,85,247,0.2)]'
+                              : isVIPItem
+                              ? 'bg-gold/15 text-gold border-gold/40 shadow-[0_0_8px_rgba(212,175,55,0.2)]'
+                              : 'bg-emerald-950/70 text-emerald-400 border-emerald-500/40'
+                          }`}>
+                            {isAdminItem ? <ShieldCheck size={11} className="text-purple-400" /> : isVIPItem ? <Sparkles size={11} className="text-gold" /> : <UserCheck size={11} className="text-emerald-400" />}
+                            {isAdminItem ? 'Administrator' : isVIPItem ? 'VIP Client' : (u.role || 'Client Lead')}
+                          </span>
+
+                          {/* Channel Source badge */}
+                          <span className="text-[10px] font-mono px-2 py-0.5 bg-white/5 text-gray-300 border border-white/10 rounded inline-flex items-center gap-1">
+                            {u.source === 'Registration' && <Sparkles size={10} className="text-amber-400" />}
+                            {u.source === 'Quotation Form' && <FileText size={10} className="text-emerald-400" />}
+                            {u.source === 'Contact Form' && <Mail size={10} className="text-blue-400" />}
+                            <span>{u.source === 'Registration' ? 'VIP Registration' : (u.source || 'Quotation Form')}</span>
+                          </span>
+
+                          {/* Service interest badge */}
+                          {u.service && (
+                            <span className="text-[10px] font-mono px-2 py-0.5 bg-gold/10 text-gold border border-gold/25 rounded truncate max-w-[200px] sm:max-w-[280px]">
+                              {u.service}
+                            </span>
+                          )}
+
+                          {/* Budget tier */}
+                          {u.estimatedBudget && (
+                            <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 rounded">
+                              {u.estimatedBudget}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Details / Excerpt / Scope Notes */}
+                        {(u.details || (u.activities && u.activities[0]?.title)) && (
+                          <p className="text-xs text-gray-300 font-sans leading-relaxed line-clamp-2">
+                            {u.details || u.activities[0]?.title}
+                          </p>
+                        )}
+
+                        {/* Metadata line: Email, Phone, Joined, Recorded Actions */}
+                        <div className="flex items-center gap-3 text-[11px] text-gray-400 flex-wrap pt-0.5">
+                          {u.email && (
+                            <div className="flex items-center gap-1 font-mono text-gray-300">
+                              <Mail size={11} className="text-gray-500" />
+                              <a href={`mailto:${u.email}`} className="hover:text-gold transition-colors truncate max-w-[190px]">
+                                {u.email}
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyEmail(u.email)}
+                                className="text-gray-500 hover:text-gold p-0.5 transition-colors cursor-pointer"
+                                title="Copy email address"
+                              >
+                                {isCopied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                              </button>
+                              {isCopied && <span className="text-emerald-400 text-[9px] font-bold">Copied!</span>}
+                            </div>
+                          )}
+
+                          {u.phone && (
+                            <div className="flex items-center gap-1 font-mono text-gray-300">
+                              <Phone size={11} className="text-gray-500" />
+                              <a href={`tel:${u.phone}`} className="hover:text-gold transition-colors">
+                                {u.phone}
+                              </a>
+                            </div>
+                          )}
+
+                          <span className="text-gray-500 font-mono text-[10px]">
+                            Joined: {formatDate(u.createdAt)}
+                          </span>
+
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono text-gold/80 px-2 py-0.5 bg-gold/10 border border-gold/20 rounded">
+                            <Zap size={10} className="text-gold" />
+                            <span>{u.activities?.length || u.activityCount || 1} {((u.activities?.length || u.activityCount || 1) === 1) ? 'Action' : 'Actions'}</span>
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    {u.phone ? (
-                      <div className="flex items-center justify-between gap-1 text-[11px] font-mono text-white">
-                        <a href={`tel:${u.phone}`} className="hover:text-gold transition-colors truncate" title="Call">
-                          {u.phone}
-                        </a>
+
+                    {/* Bottom Actions Bar (WhatsApp, View Profile/Details, Delete) */}
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap pt-3 border-t border-white/5 w-full justify-end">
+                      {/* Direct WhatsApp Button */}
+                      {u.phone && (
                         <a
-                          href={`https://wa.me/${u.phone.replace(/[^0-9]/g, '')}`}
+                          href={`https://wa.me/${normalizeWhatsAppNumber(u.phone)}?text=${encodeURIComponent(`Hello ${u.name || 'valued client'}, this is Natal Interior Design regarding your inquiry.`)}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="px-1.5 py-0.5 bg-emerald-950/70 border border-emerald-500/40 text-emerald-400 hover:text-emerald-300 text-[10px] font-mono flex items-center gap-1 transition-colors"
-                          title="Open WhatsApp chat"
+                          className="px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 hover:text-white rounded-sm transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                          title="Open WhatsApp chat with client"
                         >
-                          <MessageSquare size={11} />
+                          <MessageSquare size={12} />
                           <span>WhatsApp</span>
                         </a>
-                      </div>
-                    ) : (
-                      <span className="text-[11px] text-gray-600 italic">Not provided</span>
-                    )}
-                  </div>
-                </div>
+                      )}
 
-                {/* Recorded Activities & Actions */}
-                <div className="flex items-center justify-between xl:justify-end gap-3 w-full xl:w-auto pt-2 xl:pt-0 border-t xl:border-t-0 border-white/10" onClick={(e) => e.stopPropagation()}>
-                  <div className="text-left xl:text-right">
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gold/10 border border-gold/30 rounded text-[10px] font-mono text-gold font-semibold">
-                      <Zap size={10} />
-                      <span>{u.activities?.length || u.activityCount || 1} {((u.activities?.length || u.activityCount || 1) === 1) ? 'Action' : 'Actions'}</span>
+                      {/* View Profile Button */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenUserDetail(u)}
+                        className="px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-gold/10 hover:bg-gold/25 border border-gold/30 text-gold hover:text-white rounded-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                        title="Open full client dossier & edit profile"
+                      >
+                        <span>View Profile &rarr;</span>
+                      </button>
+
+                      {/* Delete Button */}
+                      <button
+                        type="button"
+                        onClick={() => onDeleteUser(u)}
+                        className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-950/40 rounded transition-colors cursor-pointer border border-transparent hover:border-red-500/30"
+                        title="Delete client record"
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
-                    {u.activities && u.activities.length > 0 && (
-                      <div className="text-[10px] font-mono text-gray-400 truncate max-w-[160px] mt-0.5">
-                        {u.activities[0].title}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenUserDetail(u)}
-                      className="px-3.5 py-2 bg-gold hover:bg-gold-light text-black-pure font-bold text-[10px] font-mono uppercase tracking-wider transition-all cursor-pointer shadow-sm rounded-sm"
-                    >
-                      Details
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDeleteUser(u)}
-                      className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-950/40 rounded transition-colors cursor-pointer border border-transparent hover:border-red-500/30"
-                      title="Delete profile"
-                    >
-                      <Trash2 size={14} />
-                    </button>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       ) : (
         /* TABLE VIEW (Dense Enterprise Format) */
@@ -1216,16 +1344,23 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                               <span>{initials || 'VIP'}</span>
                             )}
                           </div>
-                          {/* Circular Live Dot on top of profile avatar */}
-                          <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center pointer-events-none">
+                          {/* Circular Live Dot at bottom of profile avatar */}
+                          <span className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center pointer-events-none">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
                             <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500 border border-black-pure shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span>
                           </span>
                         </div>
                         <div>
-                          <span className="font-semibold text-white group-hover:text-gold transition-colors block">
-                            {u.name || 'Anonymous Client'}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-white group-hover:text-gold transition-colors block">
+                              {u.name || 'Anonymous Client'}
+                            </span>
+                            {!u.role?.includes('Admin') && !u.email?.toLowerCase().includes('admin') && ((getUserTimestamp(u) > 0 && Date.now() - getUserTimestamp(u) < 7 * 24 * 3600 * 1000) || (idx === 0 && !u.role?.includes('Admin') && !u.email?.toLowerCase().includes('admin'))) && (
+                              <span className="text-[8px] font-mono px-1.5 py-0.2 bg-gold text-black-pure font-bold rounded shadow-sm inline-flex items-center gap-0.5">
+                                <Sparkles size={8} /> NEW
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[10px] font-mono text-gray-500">{u.id || 'Verified Profile'}</span>
                         </div>
                       </div>
@@ -1383,8 +1518,8 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                       <span>{getUserInitials(selectedUserDetail.name, selectedUserDetail.email) || (selectedUserDetail.name || 'U')[0].toUpperCase()}</span>
                     )}
                   </div>
-                  {/* Circular Live Dot on top of avatar */}
-                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center pointer-events-none" title="Live Profile">
+                  {/* Circular Live Dot at bottom of avatar */}
+                  <span className="absolute -bottom-0.5 -left-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none" title="Live Profile">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
                   </span>
@@ -1518,8 +1653,9 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                       className={`w-full bg-black-pure border ${editNameError ? 'border-red-500/80 focus:border-red-500' : 'border-gold/30 focus:border-gold'} px-3 py-2 text-white text-xs focus:outline-none`}
                     />
                     {editNameError && (
-                      <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1">
-                        <span>⚠</span> {editNameError}
+                      <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1.5">
+                        <AlertCircle size={10} className="shrink-0" />
+                        <span>{editNameError}</span>
                       </p>
                     )}
                   </div>
@@ -1553,8 +1689,9 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                       className={`w-full bg-black-pure border ${editPhoneError ? 'border-red-500/80 focus:border-red-500' : 'border-gold/30 focus:border-gold'} px-3 py-2 text-white text-xs focus:outline-none`}
                     />
                     {editPhoneError && (
-                      <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1">
-                        <span>⚠</span> {editPhoneError}
+                      <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1.5">
+                        <AlertCircle size={10} className="shrink-0" />
+                        <span>{editPhoneError}</span>
                       </p>
                     )}
                   </div>
@@ -1654,7 +1791,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                       {selectedUserDetail.phone}
                     </a>
                     <a
-                      href={`https://wa.me/${selectedUserDetail.phone.replace(/[^0-9]/g, '')}`}
+                      href={`https://wa.me/${normalizeWhatsAppNumber(selectedUserDetail.phone)}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-2 py-0.5 bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-[10px] font-mono flex items-center gap-1 hover:bg-emerald-900/60 transition-colors"
@@ -2014,8 +2151,9 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                   className={`w-full bg-black-rich border ${nameError ? 'border-red-500/80 focus:border-red-500' : 'border-gold/30 focus:border-gold'} p-2.5 text-white focus:outline-none transition-colors placeholder:text-gray-600`}
                 />
                 {nameError && (
-                  <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1">
-                    <span>⚠</span> {nameError}
+                  <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1.5">
+                    <AlertCircle size={10} className="shrink-0" />
+                    <span>{nameError}</span>
                   </p>
                 )}
               </div>
@@ -2056,8 +2194,9 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                   className={`w-full bg-black-rich border ${phoneError ? 'border-red-500/80 focus:border-red-500' : 'border-gold/30 focus:border-gold'} p-2.5 text-white focus:outline-none transition-colors placeholder:text-gray-600 font-mono`}
                 />
                 {phoneError && (
-                  <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1">
-                    <span>⚠</span> {phoneError}
+                  <p className="text-[9px] font-mono text-red-400 mt-1 flex items-center gap-1.5">
+                    <AlertCircle size={10} className="shrink-0" />
+                    <span>{phoneError}</span>
                   </p>
                 )}
               </div>

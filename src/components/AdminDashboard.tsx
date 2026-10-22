@@ -9,7 +9,7 @@ import {
   Sparkles, ExternalLink, Calendar, Phone, Mail, FileText, Menu, X, Bell, User, SplitSquareHorizontal, ArrowLeft, ChevronDown,
   Briefcase, Edit3, Layers, Paintbrush, ArrowUp, ArrowRight, Check, Settings, AlertCircle, EyeOff, ChevronUp, RotateCcw, Sliders,
   Hammer, HardHat, Zap, Droplet, TreePine, Building2, UserCheck, UserPlus, Search, Download, Filter, MessageSquare, Copy, Camera,
-  Lock, Unlock, HardDrive, Film, Video, FileUp, Play, Database, FileCode, FolderArchive, CheckCircle2
+  Lock, Unlock, HardDrive, Film, Video, FileUp, Play, Database, FileCode, FolderArchive, CheckCircle2, Clock
 } from 'lucide-react';
 import NatalLogo from './NatalLogo';
 import { 
@@ -20,18 +20,26 @@ import {
   readFileAsDataUrl, saveMediaAssetToCloud, seedInitialDatabaseIfEmpty, MediaAsset, loadMediaAssetData,
   sanitizeForFirestore, triggerOwnerEmailNotification,
   getEmailServiceSettings, saveEmailServiceSettings, EmailServiceSettings,
+  WhatsAppServiceSettings, getWhatsAppServiceSettings, saveWhatsAppServiceSettings,
+  triggerOwnerWhatsAppNotification, DispatchedWhatsAppRecord, getLocalWhatsAppDispatches,
+  getOwnerWhatsAppUrl, formatOwnerLeadWhatsAppMessage, getClientWhatsAppReplyUrl, normalizeWhatsAppNumber,
+  playActivityChime,
   sanitizeNameInput, isValidName, sanitizePhoneInput, isValidPhone, isValidEmail,
   handleNameKeyDown, handleNamePaste, handlePhoneKeyDown, handlePhonePaste,
-  CONTAINS_DIGITS_OR_SYMBOLS_REGEX
+  CONTAINS_DIGITS_OR_SYMBOLS_REGEX,
+  getUserTimestamp, parseTimestampToMs,
+  showAppNotification
 } from '../utils';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import AdminUsersTab from './AdminUsersTab';
 import SiteSectionsEditor from './SiteSectionsEditor';
 import AdminMediaVaultTab from './AdminMediaVaultTab';
+import ExportButton from './ExportButton';
+import ClientEngagementMetricsChart from './ClientEngagementMetricsChart';
 import GoldSpinner from './GoldSpinner';
 import { TableRowSkeleton, CardSkeleton } from './SkeletonLoader';
 
-export type AdminTabType = 'projects' | 'services' | 'leads' | 'users' | 'testimonials' | 'transformations' | 'settings' | 'notifications' | 'profile' | 'sections' | 'media';
+export type AdminTabType = 'projects' | 'services' | 'leads' | 'users' | 'testimonials' | 'transformations' | 'settings' | 'notifications' | 'profile' | 'sections' | 'media' | 'communications';
 
 interface AdminDashboardProps {
   onNavigateHome: () => void;
@@ -250,45 +258,11 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const [services, setServices] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [userActivities, setUserActivities] = useState<any[]>([]);
   const [mediaAssets, setMediaAssets] = useState<any[]>([]);
+  const [whatsappDispatches, setWhatsappDispatches] = useState<DispatchedWhatsAppRecord[]>(() => getLocalWhatsAppDispatches());
   const [leadAttachmentModal, setLeadAttachmentModal] = useState<any | null>(null);
   const [isSyncingDb, setIsSyncingDb] = useState(false);
-
-  // Default system notifications so new or empty admins always have active executive alerts
-  const defaultSystemAlerts = useMemo(() => [
-    {
-      id: 'sys_alert_1',
-      title: 'Consultation Inquiry Received',
-      name: 'Elena Rostova',
-      email: 'elena.rostova@atelier-vip.com',
-      service: 'Bespoke Penthouse Interior & Gypsum Ceilings',
-      details: 'Requested full architectural consultation and customized gypsum design proposal.',
-      source: 'Quotation Portal',
-      timestamp: Date.now() - 3600000,
-      type: 'lead'
-    },
-    {
-      id: 'sys_alert_2',
-      title: 'New VIP Client Registration',
-      name: 'Marcus Sterling',
-      email: 'm.sterling@investments.co',
-      role: 'VIP Client',
-      source: 'Client Portal',
-      timestamp: Date.now() - 7200000,
-      type: 'user'
-    },
-    {
-      id: 'sys_alert_3',
-      title: 'Cloud Database Vault Synchronized',
-      name: 'Google Cloud Firestore',
-      email: 'system@natalinterior.com',
-      service: 'Real-time Security Audit',
-      details: 'Master database and media vault verified active and securely encrypted.',
-      source: 'System Health',
-      timestamp: Date.now() - 14400000,
-      type: 'system'
-    }
-  ], []);
 
   // Notification Read State & Unread Counts (displays digits on badges)
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>(() => {
@@ -299,17 +273,17 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     }
   });
 
-  // Calculate unread notifications count from leads, client registrations & system alerts
+  // Calculate unread notifications count strictly from real database records (real CRM leads, registered clients, and WhatsApp dispatches)
   const unreadNotificationsCount = useMemo(() => {
     let count = 0;
-    // Unread leads
+    // Real CRM leads from Firestore
     leads.forEach((l: any, idx: number) => {
       const id = l.id || `lead_${l.email || l.phone || idx}`;
       if (!readNotificationIds.includes(id)) {
         count++;
       }
     });
-    // Unread client profiles (non-admin)
+    // Real client profiles from Firestore (non-admin)
     users.forEach((u: any, idx: number) => {
       if (!u.isAdmin && !u.email?.toLowerCase().includes('admin') && u.role !== 'Administrator') {
         const id = u.id || `user_${u.email || idx}`;
@@ -318,14 +292,15 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
         }
       }
     });
-    // Unread default system alerts
-    defaultSystemAlerts.forEach(alert => {
-      if (!readNotificationIds.includes(alert.id)) {
+    // Real WhatsApp dispatches from Firestore
+    whatsappDispatches.forEach((rec: any, idx: number) => {
+      const id = rec.id || `wa_${rec.createdAt || idx}`;
+      if (!readNotificationIds.includes(id)) {
         count++;
       }
     });
     return count;
-  }, [leads, users, readNotificationIds, defaultSystemAlerts]);
+  }, [leads, users, whatsappDispatches, readNotificationIds]);
 
   const handleMarkAllNotificationsRead = () => {
     const allIds: string[] = [];
@@ -337,13 +312,13 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
         allIds.push(u.id || `user_${u.email || idx}`);
       }
     });
-    defaultSystemAlerts.forEach(alert => {
-      allIds.push(alert.id);
+    whatsappDispatches.forEach((rec: any, idx: number) => {
+      allIds.push(rec.id || `wa_${rec.createdAt || idx}`);
     });
     const updated = Array.from(new Set([...readNotificationIds, ...allIds]));
     setReadNotificationIds(updated);
     localStorage.setItem('natal_read_notification_ids', JSON.stringify(updated));
-    setSuccessNotice("✓ All notifications marked as read.");
+    setSuccessNotice("All notifications marked as read.");
     setTimeout(() => setSuccessNotice(''), 3000);
   };
 
@@ -355,6 +330,21 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     }
   };
 
+  const handleToggleNotificationRead = (id: string) => {
+    if (readNotificationIds.includes(id)) {
+      const updated = readNotificationIds.filter(itemId => itemId !== id);
+      setReadNotificationIds(updated);
+      localStorage.setItem('natal_read_notification_ids', JSON.stringify(updated));
+    } else {
+      const updated = [...readNotificationIds, id];
+      setReadNotificationIds(updated);
+      localStorage.setItem('natal_read_notification_ids', JSON.stringify(updated));
+    }
+  };
+
+  const [notificationFilter, setNotificationFilter] = useState<'all' | 'unread' | 'leads' | 'users' | 'whatsapp'>('all');
+  const [notificationSearch, setNotificationSearch] = useState('');
+
   const [isEditingAdminName, setIsEditingAdminName] = useState(false);
   const [adminNameInput, setAdminNameInput] = useState('');
 
@@ -363,7 +353,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     if (!adminNameInput.trim()) return;
     const newName = adminNameInput.trim();
     if (!isValidName(newName)) {
-      alert("Error: Admin name must contain letters only (no numbers, digits or symbols).");
+      showAppNotification("Error: Admin name must contain letters only (no numbers, digits or symbols).", "error");
       return;
     }
     await setAdminProfile({ name: newName });
@@ -576,6 +566,87 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const [mailNotice, setMailNotice] = useState('');
   const [emailConfig, setEmailConfig] = useState<EmailServiceSettings>(() => getEmailServiceSettings());
   const [emailConfigSaved, setEmailConfigSaved] = useState('');
+  const [whatsappConfig, setWhatsappConfig] = useState<WhatsAppServiceSettings>(() => getWhatsAppServiceSettings());
+  const [whatsappConfigSaved, setWhatsappConfigSaved] = useState('');
+  const [isSendingTestWhatsApp, setIsSendingTestWhatsApp] = useState(false);
+  const [whatsappNotice, setWhatsappNotice] = useState('');
+  const [directTestWhatsAppUrl, setDirectTestWhatsAppUrl] = useState('');
+  const [latestIncomingAlert, setLatestIncomingAlert] = useState<DispatchedWhatsAppRecord | null>(null);
+  const [gatewayTestResult, setGatewayTestResult] = useState<{ status: 'idle' | 'testing' | 'success' | 'error'; message: string } | null>(null);
+  const isInitialSnapshotRef = useRef(true);
+
+  // Listen for WhatsApp activity dispatches in real-time
+  useEffect(() => {
+    const handleDispatched = (e: any) => {
+      if (e?.detail) {
+        setWhatsappDispatches(prev => [e.detail, ...prev.filter(d => d.id !== e.detail.id)].slice(0, 50));
+        setLatestIncomingAlert(e.detail);
+        playActivityChime();
+        if (whatsappConfig.autoOpenWhatsAppInAdminOnNewLead && e.detail.directWhatsAppUrl) {
+          try {
+            window.open(e.detail.directWhatsAppUrl, '_blank');
+          } catch {}
+        }
+      }
+    };
+    window.addEventListener('natal_whatsapp_activity_dispatched', handleDispatched);
+    return () => window.removeEventListener('natal_whatsapp_activity_dispatched', handleDispatched);
+  }, [whatsappConfig.autoOpenWhatsAppInAdminOnNewLead]);
+
+  // Listen to Firestore whatsapp_notifications collection in real-time
+  useEffect(() => {
+    try {
+      const q = query(collection(db, 'whatsapp_notifications'), orderBy('createdAt', 'desc'));
+      const unsubscribe = onSnapshot(q, (snap) => {
+        if (!snap.empty) {
+          const records: DispatchedWhatsAppRecord[] = snap.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              recipientPhone: data.recipientPhone || '',
+              activityType: data.activityType || 'Website Activity',
+              clientName: data.clientName || '',
+              clientPhone: data.clientPhone || '',
+              clientEmail: data.clientEmail || '',
+              service: data.service || '',
+              details: data.details || '',
+              message: data.message || '',
+              directWhatsAppUrl: data.directWhatsAppUrl || '',
+              status: data.status || 'dispatched',
+              createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+            };
+          });
+          setWhatsappDispatches(records.slice(0, 50));
+
+          if (isInitialSnapshotRef.current) {
+            isInitialSnapshotRef.current = false;
+          } else {
+            const docChanges = snap.docChanges();
+            const added = docChanges.find(c => c.type === 'added');
+            if (added) {
+              const addedRecord = records.find(r => r.id === added.doc.id) || records[0];
+              if (addedRecord) {
+                setLatestIncomingAlert(addedRecord);
+                playActivityChime();
+                if (whatsappConfig.autoOpenWhatsAppInAdminOnNewLead && addedRecord.directWhatsAppUrl) {
+                  try {
+                    window.open(addedRecord.directWhatsAppUrl, '_blank');
+                  } catch {}
+                }
+              }
+            }
+          }
+        } else {
+          isInitialSnapshotRef.current = false;
+        }
+      }, (err) => {
+        console.warn('Firestore whatsapp_notifications live listener note:', err);
+      });
+      return () => unsubscribe();
+    } catch (e) {
+      console.warn('Firestore whatsapp_notifications listener setup note:', e);
+    }
+  }, [whatsappConfig.autoOpenWhatsAppInAdminOnNewLead]);
 
   // Admin Authentication State
   const [adminAuthMode, setAdminAuthMode] = useState<'login' | 'register'>('login');
@@ -942,7 +1013,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
 
       const map = new Map<string, any>();
 
-      // 1. Process users from Firestore
+      // 1. Process authentic users from Firestore
       fbUsersList.forEach(u => {
         const key = (u.email ? u.email.toLowerCase().trim() : '') || u.id || u.phone;
         if (key) {
@@ -953,44 +1024,19 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
         }
       });
 
-      // 2. Merge local storage registered users
+      // 2. Always merge local storage registered users so new profiles appear immediately
       localUsers.forEach((lu: any) => {
         const key = (lu.email ? lu.email.toLowerCase().trim() : '') || lu.id || lu.phone;
-        if (key) {
-          if (!map.has(key)) {
-            map.set(key, { 
-              ...lu,
-              activities: Array.isArray(lu.activities) ? [...lu.activities] : []
-            });
-          } else {
-            const existing = map.get(key);
-            const combinedActs = [...(lu.activities || []), ...(existing.activities || [])];
-            const seenActs = new Set<string>();
-            const uniqueActs: any[] = [];
-            for (const act of combinedActs) {
-              const actKey = act.id || `${act.type}_${act.timestamp}`;
-              if (!seenActs.has(actKey)) {
-                seenActs.add(actKey);
-                uniqueActs.push(act);
-              }
-            }
-            map.set(key, {
-              ...lu,
-              ...existing,
-              phone: existing.phone || lu.phone,
-              photoURL: lu.photoURL || existing.photoURL,
-              service: existing.service || lu.service,
-              details: existing.details || lu.details,
-              activities: uniqueActs,
-              activityCount: uniqueActs.length,
-              lastActive: existing.lastActive || lu.lastActive
-            });
-          }
+        if (key && !map.has(key)) {
+          map.set(key, { 
+            ...lu,
+            activities: Array.isArray(lu.activities) ? [...lu.activities] : []
+          });
         }
       });
 
-      // 3. Merge all quotation & contact leads (both from Firestore and local cache)
-      const allLeads = [...extraFbLeads, ...localLeads];
+      // 3. Merge real quotation & contact leads from Firestore (fall back to local only if database has none)
+      const allLeads = extraFbLeads.length > 0 ? extraFbLeads : localLeads;
       allLeads.forEach((lead: any) => {
         const key = (lead.email ? lead.email.toLowerCase().trim() : '') || lead.phone || lead.id;
         const leadAct = {
@@ -1039,8 +1085,8 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
         }
       });
 
-      // 4. Merge standalone activities from user_activities (Firestore & local)
-      const allActs = [...extraFbActs, ...localActivities];
+      // 4. Merge standalone activities from user_activities (prioritizing Firestore)
+      const allActs = extraFbActs.length > 0 ? extraFbActs : localActivities;
       allActs.forEach((act: any) => {
         const userKey = (act.userEmail ? act.userEmail.toLowerCase().trim() : '') || act.userId || act.userPhone;
         const actTimestamp = act.timestamp || (act.createdAt?.seconds ? new Date(act.createdAt.seconds * 1000).toISOString() : new Date().toISOString());
@@ -1117,20 +1163,31 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           isAdmin: true,
           photoURL: currentAdminData.photoURL,
           source: 'Registration',
-          createdAt: new Date().toISOString(),
-          lastActive: new Date().toISOString(),
+          createdAt: '2024-01-01T00:00:00.000Z',
+          lastActive: '2024-01-01T00:00:00.000Z',
           activities: [{
             id: 'admin_init_act',
             type: 'registration',
             title: 'System Administrator Profile',
             description: 'Master Administrator with full system control and client management.',
-            timestamp: new Date().toISOString()
+            timestamp: '2024-01-01T00:00:00.000Z'
           }],
           activityCount: 1
         });
       }
 
-      return Array.from(map.values());
+      return Array.from(map.values()).sort((a, b) => {
+        const isAdminA = a.role === 'Administrator' || a.isAdmin || (a.email && a.email.toLowerCase().includes('admin'));
+        const isAdminB = b.role === 'Administrator' || b.isAdmin || (b.email && b.email.toLowerCase().includes('admin'));
+        // Client accounts / newly registered users always come before administrator
+        if (!isAdminA && isAdminB) return -1;
+        if (isAdminA && !isAdminB) return 1;
+
+        const timeA = getUserTimestamp(a);
+        const timeB = getUserTimestamp(b);
+        if (timeB !== timeA) return timeB - timeA;
+        return 0;
+      });
     };
 
     try {
@@ -1138,14 +1195,8 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       unsubLeads = onSnapshot(colLeads, (snapshot) => {
         const fbLeads = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         latestFbLeads = fbLeads;
-        const localLeads = JSON.parse(localStorage.getItem('natal_local_leads') || '[]');
-        const combined = [...fbLeads];
-        localLeads.forEach((ll: any) => {
-          if (!combined.some(cl => cl.id === ll.id)) {
-            combined.unshift(ll);
-          }
-        });
-        setLeads(deduplicateList(combined));
+        // True database records from Firestore
+        setLeads(fbLeads);
         // Instantly update Users directory with fresh quotation leads & activities
         setUsers(syncAndAggregateUsers(latestFbUsers, latestFbLeads, latestFbActivities));
       }, (err) => {
@@ -1162,14 +1213,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       const colTestimonials = collection(db, 'testimonials');
       unsubTestimonials = onSnapshot(colTestimonials, (snapshot) => {
         const fbTestimonials = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        const localTestimonials = JSON.parse(localStorage.getItem('natal_local_testimonials') || '[]');
-        const combined = [...fbTestimonials];
-        localTestimonials.forEach((lt: any) => {
-          if (!combined.some(ct => ct.id === lt.id)) {
-            combined.unshift(lt);
-          }
-        });
-        setTestimonials(deduplicateList(combined));
+        setTestimonials(fbTestimonials);
       }, (err) => {
         console.warn("Firestore testimonials snapshot fallback to local:", err);
         const localTestimonials = JSON.parse(localStorage.getItem('natal_local_testimonials') || '[]');
@@ -1183,14 +1227,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       const colTransformations = collection(db, 'transformations');
       unsubTransformations = onSnapshot(colTransformations, (snapshot) => {
         const fbTransformations = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        const localTransformations = JSON.parse(localStorage.getItem('natal_local_transformations') || '[]');
-        const combined = [...fbTransformations];
-        localTransformations.forEach((lt: any) => {
-          if (!combined.some(ct => ct.id === lt.id)) {
-            combined.unshift(lt);
-          }
-        });
-        setTransformations(deduplicateList(combined));
+        setTransformations(fbTransformations);
       }, (err) => {
         console.warn("Firestore transformations snapshot fallback to local:", err);
         const localTransformations = JSON.parse(localStorage.getItem('natal_local_transformations') || '[]');
@@ -1222,19 +1259,33 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       unsubActivities = onSnapshot(colActivities, (snapshot) => {
         const fbActivities = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         latestFbActivities = fbActivities;
+        setUserActivities(fbActivities);
         setUsers(syncAndAggregateUsers(latestFbUsers, latestFbLeads, latestFbActivities));
       }, (err) => {
         console.warn("Firestore user_activities snapshot fallback:", err);
+        const local = JSON.parse(localStorage.getItem('natal_user_activities') || '[]');
+        setUserActivities(local);
       });
     } catch (e) {
       console.warn("Firestore user_activities error:", e);
+      const local = JSON.parse(localStorage.getItem('natal_user_activities') || '[]');
+      setUserActivities(local);
     }
 
     const handleCustomUserUpdate = () => {
       setUsers(syncAndAggregateUsers(latestFbUsers, latestFbLeads, latestFbActivities));
     };
+    const handleLeadSubmitted = (e: any) => {
+      const newLead = e?.detail;
+      if (newLead) {
+        setLeads(prev => [newLead, ...prev.filter(l => l.id !== newLead.id)]);
+      }
+      playActivityChime();
+      setUsers(syncAndAggregateUsers(latestFbUsers, latestFbLeads, latestFbActivities));
+    };
     window.addEventListener('natal_users_updated', handleCustomUserUpdate);
     window.addEventListener('natal_activity_recorded', handleCustomUserUpdate);
+    window.addEventListener('natal_lead_submitted', handleLeadSubmitted);
 
     return () => {
       unsubProjects();
@@ -1245,6 +1296,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       unsubActivities();
       window.removeEventListener('natal_users_updated', handleCustomUserUpdate);
       window.removeEventListener('natal_activity_recorded', handleCustomUserUpdate);
+      window.removeEventListener('natal_lead_submitted', handleLeadSubmitted);
       unsubTestimonials();
       unsubTransformations();
       unsubMedia();
@@ -1340,7 +1392,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           (p.originalTitle ? p.originalTitle.toLowerCase() !== card.originalTitle?.toLowerCase() : true)
         ));
 
-        setSuccessNotice(`✓ Featured Interior Creation "${card.title}" reset to original default state.`);
+        setSuccessNotice(`Featured Interior Creation "${card.title}" reset to original default state.`);
       } else if (card.section === 'projects') {
         const docId = card.id;
         const currentLocal = JSON.parse(localStorage.getItem('natal_local_projects') || '[]');
@@ -1365,7 +1417,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           (p.originalTitle ? p.originalTitle.toLowerCase() !== card.originalTitle?.toLowerCase() : true)
         ));
 
-        setSuccessNotice(`✓ Featured Project "${card.title}" reset to original default.`);
+        setSuccessNotice(`Featured Project "${card.title}" reset to original default.`);
       } else if (card.section === 'services') {
         const sId = card.originalId || card.id.replace('service-', '');
         const currentLocal = JSON.parse(localStorage.getItem('natal_local_services') || '[]');
@@ -1379,25 +1431,25 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
         }
 
         setServices(prev => prev.filter(s => s.id !== sId && s.originalId !== sId));
-        setSuccessNotice(`✓ Service card "${card.title}" reset to original default.`);
+        setSuccessNotice(`Service card "${card.title}" reset to original default.`);
       } else if (card.section === 'why_us') {
         localStorage.removeItem('natal_section_why_us');
         await saveSectionContent('why_us', defaultWhyUsContent);
-        setSuccessNotice(`✓ Why Choose Us cards restored to original default.`);
+        setSuccessNotice("Why Choose Us cards restored to original default.");
       } else if (card.section === 'process') {
         localStorage.removeItem('natal_section_process');
         await saveSectionContent('process', defaultProcessContent);
-        setSuccessNotice(`✓ Process steps restored to original default.`);
+        setSuccessNotice("Process steps restored to original default.");
       } else if (card.section === 'hero') {
         localStorage.removeItem('natal_section_hero');
         await saveSectionContent('hero', defaultHeroContent);
-        setSuccessNotice(`✓ Hero Quick Cards restored to original default.`);
+        setSuccessNotice("Hero Quick Cards restored to original default.");
       } else if (card.section === 'testimonials') {
         handleDeleteTestimonial(card.id);
-        setSuccessNotice(`✓ Testimonial "${card.title}" removed.`);
+        setSuccessNotice(`Testimonial "${card.title}" removed.`);
       } else {
         handleDeleteProject(card.id);
-        setSuccessNotice(`✓ Creation "${card.title}" deleted.`);
+        setSuccessNotice(`Creation "${card.title}" deleted.`);
       }
       setTimeout(() => setSuccessNotice(''), 4500);
     } catch (err: any) {
@@ -1409,7 +1461,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !desc || (!imageUrl && !imagePreview)) {
-      alert("Please fill in the title, description, and provide an image.");
+      showAppNotification("Please fill in the title, description, and provide an image.", "info");
       return;
     }
 
@@ -1464,7 +1516,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
             return [{ id: docId, ...payload }, ...rest];
           });
 
-          setSuccessNotice(`✓ Featured Interior Creation "${title}" updated successfully! Changes are live on the website.`);
+          setSuccessNotice(`Featured Interior Creation "${title}" updated successfully! Changes are live on the website.`);
         } else if (section === 'projects') {
           // Update / override Featured Project
           const docId = editingCardMeta.id.startsWith('project-') ? `custom_${editingCardMeta.id}` : editingCardMeta.id;
@@ -1511,7 +1563,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
             return [{ id: docId, ...payload }, ...rest];
           });
 
-          setSuccessNotice(`✓ Featured Project "${title}" updated successfully! Live on website.`);
+          setSuccessNotice(`Featured Project "${title}" updated successfully! Live on website.`);
         } else if (section === 'services') {
           // Update Service
           const sId = editingCardMeta.originalId || editingCardMeta.id.replace('service-', '');
@@ -1546,7 +1598,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
             return [servicePayload, ...rest];
           });
 
-          setSuccessNotice(`✓ Service card "${title}" updated successfully! Live in Our Services.`);
+          setSuccessNotice(`Service card "${title}" updated successfully! Live in Our Services.`);
         } else if (section === 'why_us') {
           // Update Why Choose Us item
           const currentContent = JSON.parse(localStorage.getItem('natal_section_why_us') || 'null') || defaultWhyUsContent;
@@ -1558,7 +1610,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           const nextWhyUs = { ...currentContent, items: updatedItems };
           localStorage.setItem('natal_section_why_us', JSON.stringify(nextWhyUs));
           await saveSectionContent('why_us', nextWhyUs);
-          setSuccessNotice(`✓ Why Choose Us card "${title}" updated successfully! Live on website.`);
+          setSuccessNotice(`Why Choose Us card "${title}" updated successfully! Live on website.`);
         } else if (section === 'process') {
           // Update Process step
           const currentProcess = JSON.parse(localStorage.getItem('natal_section_process') || 'null') || defaultProcessContent;
@@ -1570,7 +1622,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           const nextProcess = { ...currentProcess, steps: updatedSteps };
           localStorage.setItem('natal_section_process', JSON.stringify(nextProcess));
           await saveSectionContent('process', nextProcess);
-          setSuccessNotice(`✓ Process step "${title}" updated successfully! Live on website.`);
+          setSuccessNotice(`Process step "${title}" updated successfully! Live on website.`);
         } else if (section === 'hero') {
           // Update Hero Quick Card
           const currentHero = JSON.parse(localStorage.getItem('natal_section_hero') || 'null') || defaultHeroContent;
@@ -1582,7 +1634,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           const nextHero = { ...currentHero, cards: updatedCards };
           localStorage.setItem('natal_section_hero', JSON.stringify(nextHero));
           await saveSectionContent('hero', nextHero);
-          setSuccessNotice(`✓ Hero Quick Card "${title}" updated successfully! Live on website.`);
+          setSuccessNotice(`Hero Quick Card "${title}" updated successfully! Live on website.`);
         } else if (section === 'testimonials') {
           // Update Testimonial
           const tId = editingCardMeta.id;
@@ -1610,7 +1662,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
             const rest = prev.filter(t => t.id !== tId);
             return [payload, ...rest];
           });
-          setSuccessNotice(`✓ Testimonial "${title}" updated successfully! Live on website.`);
+          setSuccessNotice(`Testimonial "${title}" updated successfully! Live on website.`);
         } else {
           // Regular Project Update
           const newProjItem = {
@@ -1639,7 +1691,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
             const rest = prev.filter(p => p.id !== editingProjectId);
             return [{ id: editingProjectId, ...newProjItem }, ...rest];
           });
-          setSuccessNotice(`✓ Creation "${title}" updated successfully!`);
+          setSuccessNotice(`Creation "${title}" updated successfully!`);
         }
 
         setEditingProjectId(null);
@@ -1676,7 +1728,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           setProjects(savedLocal);
         }
 
-        setSuccessNotice('✓ Creation published successfully! It appears at the very top of the homepage and gallery.');
+        setSuccessNotice("Creation published successfully! It appears at the very top of the homepage and gallery.");
       }
 
       // Reset form
@@ -1689,7 +1741,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       setCategory(savedDefault);
       setTimeout(() => setSuccessNotice(''), 4500);
     } catch (error: any) {
-      alert('Error saving project/card: ' + error.message);
+      showAppNotification('Error saving project/card: ' + error.message, 'error');
     } finally {
       setIsUploading(false);
     }
@@ -1767,7 +1819,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const handleAddOrUpdateService = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!serviceTitle.trim() || !serviceDesc.trim()) {
-      alert("Please enter both a service title and description.");
+      showAppNotification("Please enter both a service title and description.", "info");
       return;
     }
 
@@ -1863,7 +1915,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       setServiceIcon(savedDefaultDiscipline);
       setTimeout(() => setSuccessNotice(''), 5000);
     } catch (err: any) {
-      alert('Error saving service: ' + err.message);
+      showAppNotification('Error saving service: ' + err.message, 'error');
     } finally {
       setIsUploadingService(false);
     }
@@ -2021,17 +2073,17 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     e.preventDefault();
     
     if (!tName.trim() || !tRole.trim() || !tContent.trim()) {
-      alert("Please fill in the client name, role, and feedback content.");
+      showAppNotification("Please fill in the client name, role, and feedback content.", "info");
       return;
     }
 
     if (!isValidName(tName)) {
-      alert("Error: Client name must contain letters only (no numbers, digits or symbols).");
+      showAppNotification("Error: Client name must contain letters only (no numbers, digits or symbols).", "error");
       return;
     }
 
     if (!isValidName(tRole)) {
-      alert("Error: Role / Title must contain letters only (no numbers, digits or symbols).");
+      showAppNotification("Error: Role / Title must contain letters only (no numbers, digits or symbols).", "error");
       return;
     }
 
@@ -2076,7 +2128,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       setSuccessNotice('Testimonial added successfully! It is now live on the homepage.');
       setTimeout(() => setSuccessNotice(''), 4000);
     } catch (error: any) {
-      alert('Error saving testimonial: ' + error.message);
+      showAppNotification('Error saving testimonial: ' + error.message, 'error');
     } finally {
       setIsUploadingTestimonial(false);
     }
@@ -2174,7 +2226,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const handleSaveTransformation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!trBeforeImage || !trAfterImage) {
-      alert("Please provide both a Before and an After image.");
+      showAppNotification("Please provide both a Before and an After image.", "info");
       return;
     }
 
@@ -2213,7 +2265,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       setSuccessNotice('Transformation added successfully!');
       setTimeout(() => setSuccessNotice(''), 4000);
     } catch (error: any) {
-      alert('Error saving transformation: ' + error.message);
+      showAppNotification('Error saving transformation: ' + error.message, 'error');
     } finally {
       setIsUploadingTransformation(false);
     }
@@ -2244,7 +2296,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       setSuccessNotice(`Updated display mode to ${nextMode === 'cover' ? 'Fill Mode' : 'Fit Mode'}`);
       setTimeout(() => setSuccessNotice(''), 3000);
     } catch (err: any) {
-      alert("Error updating transformation mode: " + err.message);
+      showAppNotification("Error updating transformation mode: " + err.message, "error");
     }
   };
 
@@ -2270,7 +2322,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       localStorage.setItem('natal_local_transformations', JSON.stringify(updated));
       setTransformations(prev => prev.filter(t => t.id !== transformationId && t.beforeImage !== trToDelete?.beforeImage));
     } catch (e: any) {
-      alert("Error deleting transformation: " + e.message);
+      showAppNotification("Error deleting transformation: " + e.message, "error");
     }
   };
 
@@ -2278,7 +2330,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const handleSaveNewPasscode = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPasscode.trim() || newPasscode.trim().length < 4) {
-      alert("Passcode must be at least 4 characters long.");
+      showAppNotification("Passcode must be at least 4 characters long.", "error");
       return;
     }
     localStorage.setItem('natal_custom_passcode', newPasscode.trim());
@@ -2312,9 +2364,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
 
       const prov = (res as any)?.providerResult;
       if (prov && (prov.activated === false || (prov.message && prov.message.toLowerCase().includes('activate')))) {
-        setMailNotice(`⚠️ 1-Time Activation Sent: FormSubmit has dispatched an activation email to ${res.recipient || emailConfig.recipientEmail}. Please check your inbox (including Spam/Junk folder) and click "Activate Form" once to complete setup.`);
+        setMailNotice(`1-Time Activation Sent: FormSubmit has dispatched an activation email to ${res.recipient || emailConfig.recipientEmail}. Please check your inbox (including Spam/Junk folder) and click "Activate Form" once to complete setup.`);
       } else if (res.success) {
-        setMailNotice(`✅ Test email dispatched to ${res.recipient || emailConfig.recipientEmail}! Check your inbox and Spam/Junk folder.`);
+        setMailNotice(`Test email dispatched to ${res.recipient || emailConfig.recipientEmail}! Check your inbox and Spam/Junk folder.`);
       } else {
         setMailNotice('Dispatched test email. Please check your inbox and Spam/Junk folder.');
       }
@@ -2323,6 +2375,84 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     } finally {
       setIsSendingTestMail(false);
       setTimeout(() => setMailNotice(''), 12000);
+    }
+  };
+
+  // Handle Save WhatsApp Service Configuration
+  const handleSaveWhatsAppConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveWhatsAppServiceSettings(whatsappConfig);
+    setWhatsappConfigSaved('WhatsApp service configuration saved successfully!');
+    setTimeout(() => setWhatsappConfigSaved(''), 4000);
+  };
+
+  // Handle Send Test WhatsApp Notification
+  const handleSendTestWhatsApp = async () => {
+    setIsSendingTestWhatsApp(true);
+    setWhatsappNotice('');
+    setDirectTestWhatsAppUrl('');
+    try {
+      const res = await triggerOwnerWhatsAppNotification({
+        leadType: 'General Lead',
+        name: 'WhatsApp Direct Database Live Test',
+        phone: '0700000000',
+        email: emailConfig.recipientEmail || 'mukisavicent7777@gmail.com',
+        service: 'Direct Database WhatsApp Check',
+        details: `This is a live test alert dispatched directly from the database to verify that client activity is automatically routed to ${whatsappConfig.ownerWhatsAppNumber} without manual intervention.`
+      });
+
+      if (res?.directWhatsAppUrl) {
+        setDirectTestWhatsAppUrl(res.directWhatsAppUrl);
+      }
+
+      if (res?.status === 'delivered_via_callmebot') {
+        setWhatsappNotice(`Direct WhatsApp message accepted by CallMeBot for +${res.recipientPhone}! Check your WhatsApp.`);
+      } else if (res?.status === 'delivered_via_ultramsg') {
+        setWhatsappNotice(`Direct WhatsApp message delivered by UltraMsg directly to your phone (${res.recipientPhone})!`);
+      } else if (res?.status === 'delivered_via_greenapi') {
+        setWhatsappNotice(`Direct WhatsApp message delivered by Green-API directly to your phone (${res.recipientPhone})!`);
+      } else if (res?.status === 'delivered_via_webhook') {
+        setWhatsappNotice(`Automated alert dispatched directly to your WhatsApp Webhook endpoint!`);
+      } else if (res?.status === 'callmebot_key_invalid') {
+        const errMsg = (res as any)?.gatewayResponse?.message || 'APIKey is invalid';
+        setWhatsappNotice(`CallMeBot Note: ${errMsg}. To activate background delivery, follow Step 1 below to message CallMeBot, or send directly via WhatsApp.`);
+      } else if (res?.status === 'callmebot_key_required') {
+        setWhatsappNotice(`CallMeBot API key is not entered. Complete Step 1 below, or click the button below to send directly.`);
+      } else {
+        setWhatsappNotice(`Test message formatted for ${res?.recipientPhone || whatsappConfig.ownerWhatsAppNumber}. Click the button below to open in WhatsApp.`);
+      }
+    } catch (e: any) {
+      setWhatsappNotice('WhatsApp dispatch note: ' + (e?.message || 'Processed.'));
+    } finally {
+      setIsSendingTestWhatsApp(false);
+      setTimeout(() => setWhatsappNotice(''), 25000);
+    }
+  };
+
+  const handleTestGatewayLive = async () => {
+    setGatewayTestResult({ status: 'testing', message: `Testing connection to gateway for +256 ${whatsappConfig.ownerWhatsAppNumber}...` });
+    try {
+      const res = await fetch('/api/whatsapp/test-gateway', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: whatsappConfig.gatewayProvider,
+          phone: whatsappConfig.ownerWhatsAppNumber,
+          apiKey: whatsappConfig.callMeBotApiKey,
+          instanceId: whatsappConfig.ultraMsgInstanceId,
+          token: whatsappConfig.ultraMsgToken,
+          webhookUrl: whatsappConfig.webhookUrl,
+          message: 'Test ping from Natal Interior Design Admin Console'
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.success) {
+        setGatewayTestResult({ status: 'success', message: data.message || 'Gateway connected successfully!' });
+      } else {
+        setGatewayTestResult({ status: 'error', message: data.message || 'Gateway returned an error.' });
+      }
+    } catch (err: any) {
+      setGatewayTestResult({ status: 'error', message: err?.message || 'Network error reaching test endpoint.' });
     }
   };
 
@@ -2351,7 +2481,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       setUserNotice(`User "${userToDelete.name || userToDelete.email}" removed.`);
       setTimeout(() => setUserNotice(''), 3500);
     } catch (err: any) {
-      alert("Error deleting user: " + err.message);
+      showAppNotification("Error deleting user: " + err.message, "error");
     }
   };
 
@@ -2381,7 +2511,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       setNewUserService('');
       setNewUserDetails('');
     } catch (err: any) {
-      alert("Error creating user: " + err.message);
+      showAppNotification("Error creating user: " + err.message, "error");
     }
   };
 
@@ -2394,7 +2524,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
 
   const handleExportUsersCSV = () => {
     if (users.length === 0) {
-      alert("No users to export yet.");
+      showAppNotification("No users to export yet.", "info");
       return;
     }
     const headers = ['Name', 'Email', 'Phone', 'Source', 'Role', 'Status', 'Service Interested', 'Details', 'Registration Date'];
@@ -2911,84 +3041,83 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   return (
     <div className="min-h-screen bg-black-rich text-white font-sans flex flex-col">
       {/* Top Navigation Bar */}
-      <header className="h-[60px] sm:h-[70px] md:h-[76px] lg:h-[82px] bg-black-pure/95 backdrop-blur-md border-b border-gold/30 px-3 sm:px-6 lg:px-10 flex items-center justify-between sticky top-0 z-50">
-        {/* Left Side: Only Logo (Increased size and premium presentation) */}
-        <div className="flex items-center">
-          <NatalLogo className="h-9 sm:h-11 md:h-12 lg:h-14 transition-all duration-300" variant="default" />
-        </div>
+      <header className="h-[60px] sm:h-[70px] md:h-[76px] lg:h-[82px] bg-black-pure/95 backdrop-blur-md border-b border-gold/30 sticky top-0 z-50">
+        <div className="w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 h-full flex items-center justify-between">
+          {/* Left Side: Only Logo (Increased size and premium presentation) */}
+          <div className="flex items-center">
+            <NatalLogo className="h-9 sm:h-11 md:h-12 lg:h-14 transition-all duration-300" variant="default" />
+          </div>
 
-        {/* Right side: Notification icon, then Admin Profile at the right end */}
-        <div className="flex items-center gap-3 sm:gap-4 ml-auto">
-          {/* Notifications Icon with Active Badge */}
-          <button 
-            type="button"
-            onClick={() => switchTab('notifications')}
-            className={`p-1.5 sm:p-2 transition-all relative rounded-sm flex items-center justify-center cursor-pointer ${
-              activeTab === 'notifications' 
-                ? 'text-gold bg-gold/20 border border-gold/50 shadow-[0_0_12px_rgba(212,175,55,0.4)] ring-1 ring-gold/40' 
-                : 'text-gray-300 hover:text-gold hover:bg-white/10 border border-transparent'
-            }`}
-            title={`System Notifications (${unreadNotificationsCount} unread)`}
-            aria-label="System Notifications"
-          >
-            <Bell size={20} className="w-[18px] h-[18px] sm:w-[20px] sm:h-[20px] lg:w-[22px] lg:h-[22px] transition-transform hover:scale-110" />
-            {unreadNotificationsCount > 0 ? (
-              <span 
-                className="absolute -top-1 -right-1 z-10 bg-red-600 text-white font-mono text-[9px] font-extrabold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center border-2 border-black-pure shadow-[0_0_10px_rgba(239,68,68,0.9)] animate-pulse"
-                title={`${unreadNotificationsCount} new unread notifications`}
-              >
-                {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
-              </span>
-            ) : (
-              <span 
-                className="absolute -top-0.5 -right-0.5 z-10 flex h-2.5 w-2.5 items-center justify-center pointer-events-none"
-                title="Notifications active"
-              >
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500/80 border border-black-pure shadow-[0_0_4px_rgba(239,68,68,0.7)]"></span>
-              </span>
-            )}
-          </button>
-
-          {/* Admin Profile at the Right End with Circular Live Dot on Top */}
-          <div className="relative">
+          {/* Right side: Notification icon, then Admin Profile at the right end */}
+          <div className="flex items-center gap-3 sm:gap-4 lg:gap-5 ml-auto">
+            {/* Notifications Icon with Active Red Badge - High-Visibility Alert Styling (No Outer Stroke) */}
             <button 
               type="button"
-              onClick={() => switchTab('profile')}
-              className={`w-8 h-8 sm:w-9 sm:h-9 lg:w-9.5 lg:h-9.5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all relative overflow-hidden ${
-                activeTab === 'profile' 
-                  ? 'bg-gold/25 border-gold text-gold shadow-[0_0_15px_rgba(212,175,55,0.5)] ring-2 ring-gold/50' 
-                  : 'bg-gold/10 border-gold/50 text-gold/80 hover:bg-gold/20 hover:border-gold hover:text-gold'
+              onClick={() => switchTab('notifications')}
+              className={`w-10 h-10 sm:w-12 sm:h-12 lg:w-13 lg:h-13 transition-all relative rounded-lg flex items-center justify-center cursor-pointer border-0 outline-none ring-0 focus:outline-none ${
+                activeTab === 'notifications' 
+                  ? 'text-gold bg-gold/25 shadow-[0_0_18px_rgba(212,175,55,0.4)]' 
+                  : 'text-gray-300 hover:text-gold bg-white/5 hover:bg-gold/15'
               }`}
-              title={`${currentAdminName} Profile (Owner Live)`}
-              aria-label="Admin Profile"
+              title={`System Notifications (${unreadNotificationsCount} unread)`}
+              aria-label="System Notifications"
             >
-              {currentAdminAvatar ? (
-                <img 
-                  src={currentAdminAvatar} 
-                  alt={currentAdminName} 
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <span className="font-mono font-bold text-[10px] sm:text-xs text-gold">
-                  {getUserInitials(currentAdminName, currentAdminEmail)}
+              <Bell size={26} className="w-5 h-5 sm:w-6 sm:h-6 lg:w-7 lg:h-7 transition-transform group-hover:scale-110" />
+              {unreadNotificationsCount > 0 ? (
+                <span 
+                  className="absolute -top-1 -right-1 z-10 bg-red-600 text-white font-mono text-[10px] font-bold rounded-full w-5 h-5 min-w-[20px] min-h-[20px] aspect-square flex items-center justify-center p-0 leading-none shadow-md animate-pulse border-0 outline-none ring-0 pointer-events-none"
+                  title={`${unreadNotificationsCount} new unread notifications`}
+                >
+                  {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
                 </span>
-              )}
+              ) : null}
             </button>
 
-            {/* Circular Live Dot on top of Admin Profile */}
-            <span 
-              className="absolute -top-0.5 -right-0.5 flex h-3 w-3 sm:h-3.5 sm:w-3.5 items-center justify-center pointer-events-none"
-              title="Owner Live"
-            >
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-emerald-500 border-[1.5px] border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
-            </span>
+            {/* Admin Profile at the Right End with Circular Live Dot on Top - Reasonable Prominent Size */}
+            <div className="relative">
+              <button 
+                type="button"
+                onClick={() => switchTab('profile')}
+                className={`w-10 h-10 sm:w-12 sm:h-12 lg:w-13 lg:h-13 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all relative overflow-hidden shadow-md ${
+                  activeTab === 'profile' 
+                    ? 'bg-gold/30 border-gold text-gold shadow-[0_0_20px_rgba(212,175,55,0.6)] ring-2 ring-gold/60' 
+                    : 'bg-gold/10 border-gold/60 text-gold hover:bg-gold/20 hover:border-gold hover:shadow-[0_0_12px_rgba(212,175,55,0.35)]'
+                }`}
+                title={`${currentAdminName} Profile (Owner Live)`}
+                aria-label="Admin Profile"
+              >
+                {currentAdminAvatar ? (
+                  <img 
+                    src={currentAdminAvatar} 
+                    alt={currentAdminName} 
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="font-mono font-bold text-xs sm:text-sm lg:text-base text-gold">
+                    {getUserInitials(currentAdminName, currentAdminEmail)}
+                  </span>
+                )}
+              </button>
+
+              {/* Circular Live Dot at bottom of Admin Profile */}
+              <span 
+                className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 sm:h-4 sm:w-4 items-center justify-center pointer-events-none"
+                title="Owner Live"
+              >
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 sm:h-3 sm:w-3 bg-emerald-500 border-2 border-black-pure shadow-[0_0_10px_rgba(16,185,129,0.95)]"></span>
+              </span>
+            </div>
           </div>
         </div>
       </header>
 
-      {/* Main Workspace Body - Full width on phone screens, elegant layout on larger screens */}
-      <div className="max-w-[1720px] mx-auto w-full px-1.5 sm:px-6 lg:px-10 py-3 sm:py-6 lg:py-6 flex-1 flex flex-col md:flex-row gap-4 sm:gap-6 lg:gap-8 relative">
+      {/* Main Workspace Body - Matched to Home Page container width and breathing space */}
+      <div className={`w-full max-w-[98vw] xl:max-w-[95vw] 2xl:max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-4 sm:py-6 lg:py-8 flex-1 flex flex-col ${
+        activeTab === 'notifications' 
+          ? 'gap-5 sm:gap-6' 
+          : 'md:flex-row gap-5 sm:gap-6 lg:gap-8'
+      } relative`}>
         {/* Mobile Overlay */}
         {isSidebarOpen && (
           <div 
@@ -2997,229 +3126,296 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           />
         )}
 
-        {/* Left Sidebar Navigation - Polished layout */}
-        <aside className={`fixed md:sticky top-[60px] sm:top-[72px] md:top-[78px] lg:top-[86px] xl:top-[90px] left-0 h-[calc(100vh-60px)] sm:h-[calc(100vh-72px)] md:h-[calc(100vh-78px)] lg:h-[calc(100vh-86px)] xl:h-[calc(100vh-90px)] w-[270px] md:w-64 lg:w-72 xl:w-80 flex flex-col z-[50] md:z-10 transition-transform duration-300 ease-in-out md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} p-4 md:p-0 bg-black-pure/95 md:bg-transparent`}>
-          {/* Arrow-only Back Home Button without any container - placed at the left between nav bar and side bar */}
-          <div className="mb-3.5 px-1 flex items-center justify-between">
-            <button
-              onClick={onNavigateHome}
-              className="text-gold hover:text-gold-light active:scale-90 transition-all cursor-pointer group inline-flex items-center p-0 focus:outline-none"
-              title="Return to Public Website Home"
-              aria-label="Return to Public Website Home"
-            >
-              <ArrowLeft size={24} className="group-hover:-translate-x-1.5 transition-transform stroke-[2.5]" />
-            </button>
+        {/* Admin Navigation Elements Definition */}
+        {(() => {
+          const navItems: { id: AdminTabType; label: string; icon: any; count?: number }[] = [
+            { id: 'projects', label: 'Creations', icon: ImageIcon },
+            { id: 'services', label: 'Our Services', icon: Briefcase },
+            { id: 'testimonials', label: 'Testimonials', icon: ShieldCheck },
+            { id: 'transformations', label: 'Before & After', icon: SplitSquareHorizontal },
+            { id: 'sections', label: 'Brand Logo & Sections', icon: Edit3 },
+            { id: 'media', label: 'Media & Vault', icon: FolderArchive },
+            { id: 'leads', label: 'Leads', icon: Users, count: leads.length },
+            { id: 'users', label: 'Users', icon: UserCheck, count: users.length },
+            { id: 'notifications', label: 'Notifications', icon: Bell, count: unreadNotificationsCount },
+            { id: 'profile', label: 'Admin Profile', icon: User },
+            { id: 'communications', label: 'Email & WhatsApp Settings', icon: Mail },
+            { id: 'settings', label: 'Master Passcode & Security', icon: Key },
+          ];
 
-            <div className="flex items-center gap-2 md:hidden">
-              <span className="text-gold font-mono text-xs tracking-widest uppercase font-semibold">Admin Menu</span>
-              <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-white p-1">
-                <X size={22} />
-              </button>
-            </div>
-          </div>
+          if (activeTab === 'notifications') {
+            {/* FULL-WIDTH TOP ADMIN SIDE MENU (Positioned above the Admin Display and Notifications) */}
+            return (
+              <aside className="w-full bg-black-pure border border-gold/35 rounded-sm p-3.5 sm:p-4.5 shadow-[0_8px_32px_rgba(0,0,0,0.7)] z-20 flex flex-col gap-3">
+                {/* Upper Tier: Home Exit, Admin Identity with Live dot, Sign Out */}
+                <div className="flex items-center justify-between gap-3 sm:gap-4 flex-wrap pb-3 border-b border-white/10">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={onNavigateHome}
+                      className="text-gold hover:text-white active:scale-95 transition-all cursor-pointer group inline-flex items-center gap-2 px-3 py-1.5 rounded-sm bg-white/5 border border-gold/30 hover:border-gold hover:bg-gold/10"
+                      title="Return to Public Website Home"
+                      aria-label="Return to Public Website Home"
+                    >
+                      <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform stroke-[2.5]" />
+                      <span className="text-xs font-mono uppercase tracking-wider font-semibold">Exit Home</span>
+                    </button>
 
-          {/* Sidebar Container */}
-          <div className="bg-black-pure border border-gold/30 rounded-sm p-4 sm:p-5 shadow-[0_8px_32px_rgba(0,0,0,0.7)] flex-1 flex flex-col overflow-y-auto scrollbar-hide">
-            {/* Admin Identity Card in Sidebar */}
-            <div 
-              onClick={() => switchTab('profile')}
-              className="mb-5 p-3.5 bg-gradient-to-r from-gold/15 via-black-rich to-black-pure border border-gold/40 rounded-sm hover:border-gold transition-all cursor-pointer flex items-center gap-3.5 group shadow-md"
-              title="Click to view and edit Admin Profile"
-            >
-              <div className="relative shrink-0">
-                <div className="w-10 h-10 rounded-full overflow-hidden border border-gold flex items-center justify-center bg-black-pure text-gold font-bold font-mono text-xs shadow-inner">
-                  {currentAdminAvatar ? (
-                    <img src={currentAdminAvatar} alt={currentAdminName} className="w-full h-full object-cover" />
-                  ) : (
-                    <span>{getUserInitials(currentAdminName, currentAdminEmail)}</span>
-                  )}
-                </div>
-                <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 border border-black-pure"></span>
-                </span>
-              </div>
-              <div className="overflow-hidden min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <div className="text-xs font-bold text-white truncate font-heading group-hover:text-gold transition-colors">
-                    {currentAdminName}
+                    {/* Admin Identity Card */}
+                    <div 
+                      onClick={() => switchTab('profile')}
+                      className="p-1.5 sm:px-3 sm:py-1.5 bg-gradient-to-r from-gold/15 via-black-rich to-black-pure border border-gold/40 rounded-sm hover:border-gold transition-all cursor-pointer flex items-center gap-2.5 group shadow-sm"
+                      title="Click to view and edit Admin Profile"
+                    >
+                      <div className="relative shrink-0">
+                        <div className="w-8 h-8 rounded-full overflow-hidden border border-gold flex items-center justify-center bg-black-pure text-gold font-bold font-mono text-xs shadow-inner">
+                          {currentAdminAvatar ? (
+                            <img src={currentAdminAvatar} alt={currentAdminName} className="w-full h-full object-cover" />
+                          ) : (
+                            <span>{getUserInitials(currentAdminName, currentAdminEmail)}</span>
+                          )}
+                        </div>
+                        <span className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500 border border-black-pure"></span>
+                        </span>
+                      </div>
+                      <div className="overflow-hidden min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-white truncate font-heading group-hover:text-gold transition-colors">
+                            {currentAdminName}
+                          </span>
+                          <span className="text-[9px] text-emerald-400 font-mono hidden sm:inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
+                            <span>Studio Owner Live</span>
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-gray-400 truncate font-mono">
+                          {currentAdminEmail}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sign Out Button */}
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button 
+                      onClick={handleLogout}
+                      className="py-1.5 px-3.5 text-center text-xs text-red-200 border border-red-500/50 bg-red-950/40 hover:bg-red-900/60 hover:border-red-400 hover:text-white transition-all font-mono flex items-center gap-2 uppercase tracking-wider rounded-sm cursor-pointer font-bold shadow-sm active:scale-95 group"
+                      title="Sign Out of Administrator Account"
+                    >
+                      <LogOut size={14} className="text-red-400 group-hover:text-white transition-colors stroke-[2.2] shrink-0" />
+                      <span>Sign Out</span>
+                    </button>
                   </div>
                 </div>
-                <div className="text-[10px] text-gray-400 truncate font-mono">
-                  {currentAdminEmail}
-                </div>
-                <div className="text-[9px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
-                  <span className="w-1 h-1 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
-                  <span>Administrator · Verified Studio Owner</span>
+
+                {/* Lower Tier: Horizontal Navigation Tabs (The Admin Side Menu in Full Width Ribbon) */}
+                <nav className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none" aria-label="Admin Dashboard Menu">
+                  {navItems.map((tab) => {
+                    const IconComponent = tab.icon;
+                    const isActive = activeTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => switchTab(tab.id)}
+                        className={`flex items-center gap-2 px-3.5 py-2 text-xs uppercase tracking-wider font-bold transition-all whitespace-nowrap cursor-pointer rounded-sm shrink-0 ${
+                          isActive
+                            ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]'
+                            : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                        }`}
+                      >
+                        <IconComponent size={14} className={isActive ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                        <span>{tab.label}</span>
+                        {tab.count !== undefined && tab.count > 0 && (
+                          <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full bg-red-600 text-white text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none shadow-md shrink-0 border-0 outline-none ring-0">
+                            {tab.count > 99 ? '99+' : tab.count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </nav>
+              </aside>
+            );
+          }
+
+          {/* Standard Vertical Left Sidebar Navigation for other tabs */}
+          return (
+            <aside className={`fixed md:sticky top-[60px] sm:top-[72px] md:top-[78px] lg:top-[86px] xl:top-[90px] left-0 h-[calc(100vh-60px)] sm:h-[calc(100vh-72px)] md:h-[calc(100vh-78px)] lg:h-[calc(100vh-86px)] xl:h-[calc(100vh-90px)] w-[270px] md:w-60 lg:w-64 xl:w-72 shrink-0 flex flex-col z-[50] md:z-10 transition-transform duration-300 ease-in-out md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} p-4 md:p-0 bg-black-pure/95 md:bg-transparent`}>
+              {/* Arrow-only Back Home Button without any container */}
+              <div className="mb-3.5 px-1 flex items-center justify-between">
+                <button
+                  onClick={onNavigateHome}
+                  className="text-gold hover:text-gold-light active:scale-90 transition-all cursor-pointer group inline-flex items-center p-0 focus:outline-none"
+                  title="Return to Public Website Home"
+                  aria-label="Return to Public Website Home"
+                >
+                  <ArrowLeft size={24} className="group-hover:-translate-x-1.5 transition-transform stroke-[2.5]" />
+                </button>
+
+                <div className="flex items-center gap-2 md:hidden">
+                  <span className="text-gold font-mono text-xs tracking-widest uppercase font-semibold">Admin Menu</span>
+                  <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-white p-1">
+                    <X size={22} />
+                  </button>
                 </div>
               </div>
-            </div>
 
-            {/* Unified Navigation Tabs (Single Group / Continuous Flow without Fragmented Headers or Badges) */}
-            <nav className="flex flex-col gap-1.5" aria-label="Admin Dashboard Navigation">
-              <button 
-                onClick={() => switchTab('projects')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
-                  activeTab === 'projects' 
-                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <ImageIcon size={16} className={activeTab === 'projects' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
-                <span className="whitespace-nowrap truncate">Creations</span>
-              </button>
-
-              <button 
-                onClick={() => switchTab('services')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
-                  activeTab === 'services' 
-                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <Briefcase size={16} className={activeTab === 'services' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
-                <span className="whitespace-nowrap truncate">Our Services</span>
-              </button>
-
-              <button 
-                onClick={() => switchTab('testimonials')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
-                  activeTab === 'testimonials' 
-                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <ShieldCheck size={16} className={activeTab === 'testimonials' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
-                <span className="whitespace-nowrap truncate">Testimonials</span>
-              </button>
-
-              <button 
-                onClick={() => switchTab('transformations')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
-                  activeTab === 'transformations' 
-                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <SplitSquareHorizontal size={16} className={activeTab === 'transformations' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
-                <span className="whitespace-nowrap truncate">Before &amp; After</span>
-              </button>
-
-              <button 
-                onClick={() => switchTab('sections')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
-                  activeTab === 'sections' 
-                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <Edit3 size={16} className={activeTab === 'sections' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
-                <span className="whitespace-nowrap truncate">Brand Logo &amp; Sections</span>
-              </button>
-
-              <button 
-                onClick={() => switchTab('media')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
-                  activeTab === 'media' 
-                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <FolderArchive size={16} className={activeTab === 'media' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
-                <span className="whitespace-nowrap truncate">Media &amp; Vault</span>
-              </button>
-
-              <button 
-                onClick={() => switchTab('leads')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
-                  activeTab === 'leads' 
-                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <Users size={16} className={activeTab === 'leads' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
-                <span className="whitespace-nowrap truncate">Leads</span>
-              </button>
-
-              <button 
-                onClick={() => switchTab('users')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
-                  activeTab === 'users' 
-                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <UserCheck size={16} className={activeTab === 'users' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
-                <span className="whitespace-nowrap truncate">Users</span>
-              </button>
-
-              <button 
-                onClick={() => switchTab('notifications')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
-                  activeTab === 'notifications' 
-                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <Bell size={16} className={activeTab === 'notifications' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
-                  <span className="whitespace-nowrap truncate">Notifications</span>
+              {/* Sidebar Container */}
+              <div className="bg-black-pure border border-gold/30 rounded-sm p-4 sm:p-5 shadow-[0_8px_32px_rgba(0,0,0,0.7)] flex-1 flex flex-col overflow-y-auto scrollbar-hide">
+                {/* Admin Identity Card in Sidebar */}
+                <div 
+                  onClick={() => switchTab('profile')}
+                  className="mb-5 p-3.5 bg-gradient-to-r from-gold/15 via-black-rich to-black-pure border border-gold/40 rounded-sm hover:border-gold transition-all cursor-pointer flex items-center gap-3.5 group shadow-md"
+                  title="Click to view and edit Admin Profile"
+                >
+                  <div className="relative shrink-0">
+                    <div className="w-10 h-10 rounded-full overflow-hidden border border-gold flex items-center justify-center bg-black-pure text-gold font-bold font-mono text-xs shadow-inner">
+                      {currentAdminAvatar ? (
+                        <img src={currentAdminAvatar} alt={currentAdminName} className="w-full h-full object-cover" />
+                      ) : (
+                        <span>{getUserInitials(currentAdminName, currentAdminEmail)}</span>
+                      )}
+                    </div>
+                    <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 border border-black-pure"></span>
+                    </span>
+                  </div>
+                  <div className="overflow-hidden min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <div className="text-xs font-bold text-white truncate font-heading group-hover:text-gold transition-colors">
+                        {currentAdminName}
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-gray-400 truncate font-mono">
+                      {currentAdminEmail}
+                    </div>
+                    <div className="text-[9px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
+                      <span className="w-1 h-1 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
+                      <span>Administrator · Verified Studio Owner</span>
+                    </div>
+                  </div>
                 </div>
-                {unreadNotificationsCount > 0 && (
-                  <span className="ml-2 px-1.5 py-0.5 bg-red-600 text-white font-mono text-[10px] font-extrabold rounded-full min-w-[18px] h-[18px] flex items-center justify-center shadow-md animate-pulse shrink-0">
-                    {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
-                  </span>
+
+                {/* Unified Navigation Tabs */}
+                <nav className="flex flex-col gap-1.5" aria-label="Admin Dashboard Navigation">
+                  {navItems.map((tab) => {
+                    const IconComponent = tab.icon;
+                    const isActive = activeTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => switchTab(tab.id)}
+                        className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
+                          isActive
+                            ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]'
+                            : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <IconComponent size={16} className={isActive ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
+                          <span className="whitespace-nowrap truncate">{tab.label}</span>
+                        </div>
+                        {tab.count !== undefined && tab.count > 0 && (
+                          <span className="ml-2 w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full bg-red-600 text-white text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none shadow-md shrink-0 border-0 outline-none ring-0">
+                            {tab.count > 99 ? '99+' : tab.count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </nav>
+
+                {/* Prominent Sidebar Sign Out Button */}
+                <div className="pt-6 pb-2 border-t border-gold/25 mt-auto">
+                  <button 
+                    onClick={handleLogout}
+                    className="w-full py-3 sm:py-3.5 px-4 text-center text-xs sm:text-sm text-red-200 border border-red-500/50 bg-red-950/40 hover:bg-red-900/60 hover:border-red-400 hover:text-white transition-all font-mono flex items-center justify-center gap-2.5 uppercase tracking-wider rounded-sm cursor-pointer font-bold shadow-md active:scale-95 group"
+                    title="Sign Out of Administrator Account"
+                  >
+                    <LogOut size={16} className="text-red-400 group-hover:text-white transition-colors stroke-[2.2] shrink-0" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              </div>
+            </aside>
+          );
+        })()}
+
+        {/* Main Content View - Broad and wide display across right and left sides */}
+        <main className={`min-w-0 pb-12 w-full ${
+          activeTab === 'notifications' 
+            ? 'pt-1' 
+            : 'flex-1 md:px-2 lg:px-3 pt-3 md:pt-5'
+        }`}>
+          {/* Live Activity & WhatsApp Dispatch Toast / Banner */}
+          {latestIncomingAlert && (
+            <div className="mb-6 p-4 bg-[#0f0f0f] border border-gold/40 rounded-sm shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-white/5 border border-gold/30 flex items-center justify-center text-gold shrink-0">
+                  <Bell size={18} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-mono uppercase tracking-widest text-gold font-bold bg-white/5 px-2 py-0.5 border border-white/10">
+                      New Activity Recorded
+                    </span>
+                    <span className="text-[11px] font-mono text-gray-400">
+                      {new Date(latestIncomingAlert.createdAt).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-heading font-bold text-white mt-1">
+                    {latestIncomingAlert.activityType}: <span className="text-gold font-sans">{latestIncomingAlert.clientName || 'Visitor'}</span>
+                    {latestIncomingAlert.clientPhone ? ` (${latestIncomingAlert.clientPhone})` : ''}
+                  </h4>
+                  {latestIncomingAlert.service && (
+                    <p className="text-xs text-gray-300 font-mono mt-0.5">
+                      Service Requested: <strong className="text-white">{latestIncomingAlert.service}</strong>
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0 flex-wrap">
+                <a
+                  href={latestIncomingAlert.directWhatsAppUrl || getOwnerWhatsAppUrl(latestIncomingAlert)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-2 bg-gold hover:bg-gold-light text-black font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-sm rounded-sm transition-all"
+                  title="Open full lead details in WhatsApp for studio owner"
+                >
+                  <MessageSquare size={13} />
+                  <span>Send to Owner WhatsApp</span>
+                </a>
+                {latestIncomingAlert.clientPhone && (
+                  <a
+                    href={getClientWhatsAppReplyUrl(latestIncomingAlert.clientPhone, latestIncomingAlert.clientName, latestIncomingAlert.service)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2 bg-black-pure border border-white/20 hover:border-gold text-gray-200 hover:text-white font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 rounded-sm transition-all"
+                    title="Send a WhatsApp reply directly to client"
+                  >
+                    <span>Reply to Client</span>
+                  </a>
                 )}
-              </button>
-
-              <button 
-                onClick={() => switchTab('profile')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
-                  activeTab === 'profile' 
-                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <User size={16} className={activeTab === 'profile' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
-                <span className="whitespace-nowrap truncate">Admin Profile</span>
-              </button>
-
-              <button 
-                onClick={() => switchTab('settings')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs uppercase tracking-wider font-bold transition-all text-left cursor-pointer rounded-sm ${
-                  activeTab === 'settings' 
-                    ? 'bg-gold/20 text-gold border border-gold shadow-[0_0_12px_rgba(212,175,55,0.25)]' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <Key size={16} className={activeTab === 'settings' ? 'text-gold shrink-0' : 'text-gray-400 shrink-0'} />
-                <span className="whitespace-nowrap truncate">Security</span>
-              </button>
-            </nav>
-
-            {/* Prominent Sidebar Sign Out Button */}
-            <div className="pt-6 pb-2 border-t border-gold/25 mt-auto">
-              <button 
-                onClick={handleLogout}
-                className="w-full py-3 sm:py-3.5 px-4 text-center text-xs sm:text-sm text-red-200 border border-red-500/50 bg-red-950/40 hover:bg-red-900/60 hover:border-red-400 hover:text-white transition-all font-mono flex items-center justify-center gap-2.5 uppercase tracking-wider rounded-sm cursor-pointer font-bold shadow-md active:scale-95 group"
-                title="Sign Out of Administrator Account"
-              >
-                <LogOut size={16} className="text-red-400 group-hover:text-white transition-colors stroke-[2.2] shrink-0" />
-                <span>Sign Out</span>
-              </button>
+                <button
+                  onClick={() => setLatestIncomingAlert(null)}
+                  className="p-2 text-gray-400 hover:text-white text-xs transition-colors cursor-pointer"
+                  title="Dismiss alert"
+                >
+                  <X size={15} />
+                </button>
+              </div>
             </div>
-          </div>
-        </aside>
+          )}
 
-        {/* Main Content View */}
-        <main className="flex-1 min-w-0 pb-12 md:px-6 lg:px-8 xl:px-10 pt-4 md:pt-6 lg:pt-8">
-          {/* Laptop Executive Status Bar (Appears on laptop screens) */}
-          <div className="hidden lg:flex items-center justify-between mb-6 pb-4 border-b border-gold/20 bg-black-pure/60 p-4 border border-white/5 rounded-sm shadow-sm">
+          {/* Laptop Executive Status Bar (The Admin Display) */}
+          <div className="hidden lg:flex items-center justify-between mb-6 bg-[#0f0f0f] p-4 sm:p-5 border border-white/10 rounded-sm shadow-sm flex-wrap gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-2.5 h-2.5 rounded-full bg-gold animate-pulse"></div>
+              <div className="w-2.5 h-2.5 rounded-full bg-gold shrink-0"></div>
               <div>
                 <div className="text-[10px] font-mono text-gold uppercase tracking-[0.2em] font-semibold">Workspace Management</div>
-                <h1 className="text-base font-heading font-bold text-white uppercase tracking-wider">
+                <h1 className="text-base sm:text-lg font-heading font-bold text-white uppercase tracking-wider">
                   {activeTab === 'projects' && 'Portfolio & Creations'}
                   {activeTab === 'services' && 'Capabilities & Services'}
                   {activeTab === 'leads' && 'Client Inquiries & CRM'}
@@ -3228,69 +3424,167 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   {activeTab === 'transformations' && 'Before & After Transformations'}
                   {activeTab === 'sections' && 'Website Sections & Brand Editor'}
                   {activeTab === 'media' && 'Media & Asset Vault'}
-                  {activeTab === 'notifications' && 'System Notifications'}
+                  {activeTab === 'notifications' && 'System Notifications & Real-Time Alerts'}
+                  {activeTab === 'communications' && 'Email & WhatsApp Communications Hub'}
                   {activeTab === 'settings' && 'Master Passcode & Security'}
                   {activeTab === 'profile' && 'Administrator Profile'}
                 </h1>
+                {activeTab === 'notifications' && (
+                  <p className="text-xs text-gray-400 font-mono mt-0.5">
+                    Central database communications &amp; real-time interaction hub
+                  </p>
+                )}
               </div>
             </div>
 
             {/* Laptop Quick Metric Chips */}
-            <div className="flex items-center gap-2">
-              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5 shadow-sm">
                 <span className="text-gray-400">Creations:</span>
                 <span className="text-gold font-bold">{projects.length}</span>
               </div>
-              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5">
+              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5 shadow-sm">
                 <span className="text-gray-400">Services:</span>
                 <span className="text-gold font-bold">{allCombinedServices.length}</span>
               </div>
-              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5">
+              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5 shadow-sm">
                 <span className="text-gray-400">Leads:</span>
                 <span className="text-emerald-400 font-bold">{leads.length}</span>
               </div>
-              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5">
+              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5 shadow-sm">
                 <span className="text-gray-400">Users:</span>
                 <span className="text-gold font-bold">{users.length}</span>
               </div>
-              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5">
+              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5 shadow-sm">
+                <span className="text-gray-400">WhatsApp:</span>
+                <span className="text-emerald-400 font-bold">{whatsappDispatches.length}</span>
+              </div>
+              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5 shadow-sm">
                 <span className="text-gray-400">Vault:</span>
                 <span className="text-gold font-bold">{mediaAssets.length}</span>
               </div>
+              <div className="px-2.5 py-1 bg-black-rich border border-white/10 rounded text-[11px] font-mono flex items-center gap-1.5 shadow-sm text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span>DB: Live &amp; Synced</span>
+              </div>
+
+              {/* Universal Export Hub Button */}
+              <ExportButton
+                data={
+                  activeTab === 'users' ? users :
+                  activeTab === 'leads' ? leads :
+                  activeTab === 'communications' ? whatsappDispatches :
+                  activeTab === 'services' ? allCombinedServices :
+                  projects
+                }
+                columns={
+                  activeTab === 'users' ? [
+                    { header: 'Name', key: 'name' },
+                    { header: 'Email', key: 'email' },
+                    { header: 'Phone', key: 'phone' },
+                    { header: 'Role', key: 'role', format: (u: any) => u.role || 'Member' },
+                    { header: 'Source', key: 'source', format: (u: any) => u.source || 'Direct' },
+                    { header: 'Service Interest', key: 'service', format: (u: any) => u.service || '-' },
+                    { header: 'Details', key: 'details', format: (u: any) => u.details || '-' },
+                    { header: 'Date', key: 'createdAt', format: (u: any) => u.createdAt ? (typeof u.createdAt === 'string' ? u.createdAt : new Date(u.createdAt?.seconds ? u.createdAt.seconds * 1000 : Date.now()).toLocaleDateString()) : 'Recent' }
+                  ] :
+                  activeTab === 'leads' ? [
+                    { header: 'Client Name', key: 'name' },
+                    { header: 'Email', key: 'email' },
+                    { header: 'Phone', key: 'phone' },
+                    { header: 'Service Requested', key: 'service' },
+                    { header: 'Property Type', key: 'propertyType' },
+                    { header: 'Estimated Budget', key: 'budget' },
+                    { header: 'Project Timeline', key: 'timeline' },
+                    { header: 'Client Notes', key: 'details' },
+                    { header: 'Date Submitted', key: 'createdAt', format: (l: any) => l.createdAt ? new Date(l.createdAt).toLocaleDateString() : 'Recent' }
+                  ] :
+                  activeTab === 'communications' ? [
+                    { header: 'Activity Type', key: 'activityType' },
+                    { header: 'Client Name', key: 'clientName' },
+                    { header: 'Client Email', key: 'clientEmail' },
+                    { header: 'Recipient Phone', key: 'recipientPhone' },
+                    { header: 'Service / Subject', key: 'service' },
+                    { header: 'Message Details', key: 'details' },
+                    { header: 'Timestamp', key: 'createdAt', format: (r: any) => r.createdAt ? new Date(r.createdAt).toLocaleString() : 'Recent' }
+                  ] :
+                  activeTab === 'services' ? [
+                    { header: 'Service Title', key: 'title' },
+                    { header: 'Category', key: 'category' },
+                    { header: 'Price / Rate', key: 'price' },
+                    { header: 'Description', key: 'desc', format: (s: any) => s.desc || s.description || '' }
+                  ] :
+                  [
+                    { header: 'Creation Title', key: 'title' },
+                    { header: 'Section', key: 'section' },
+                    { header: 'Category', key: 'category' },
+                    { header: 'Description', key: 'desc', format: (p: any) => p.desc || p.description || '' },
+                    { header: 'Image Asset URL', key: 'image' }
+                  ]
+                }
+                title={`Natal Interior Design - ${
+                  activeTab === 'users' ? 'User Directory' :
+                  activeTab === 'leads' ? 'Client Leads & Quotes' :
+                  activeTab === 'communications' ? 'WhatsApp Dispatches Log' :
+                  activeTab === 'services' ? 'Services Catalogue' :
+                  activeTab === 'notifications' ? 'Notifications Stream' :
+                  'Portfolio Creations'
+                }`}
+                subtitle={`Exported report for admin records and CRM management`}
+                category={activeTab}
+                filenamePrefix={`natal_${activeTab}_report`}
+                summaryCards={[
+                  { label: 'Total Records', value: (
+                    activeTab === 'users' ? users.length :
+                    activeTab === 'leads' ? leads.length :
+                    activeTab === 'communications' ? whatsappDispatches.length :
+                    activeTab === 'services' ? allCombinedServices.length :
+                    projects.length
+                  ) },
+                  { label: 'Active Leads', value: leads.length },
+                  { label: 'Registered Clients', value: users.length },
+                  { label: 'WhatsApp Alerts', value: whatsappDispatches.length }
+                ]}
+                buttonLabel="Export Report"
+                size="sm"
+                variant="gold"
+              />
             </div>
           </div>
 
-          {/* Mobile & Tablet Bar: Back Home Arrow & Extended Hamburger Menu */}
-          <div className="md:hidden flex items-center justify-between mb-5 border-b border-gold/20 pb-3 px-1 sm:px-6">
-            <div className="flex items-center gap-4">
-              {/* Back Home Arrow directly linking admin back */}
-              <button 
-                onClick={onNavigateHome}
-                className="text-gold hover:text-white transition-colors p-1 cursor-pointer group"
-                title="Back to Website Home"
-              >
-                <ArrowLeft size={24} className="group-hover:-translate-x-0.5 transition-transform" />
-              </button>
+          {/* Mobile & Tablet Bar: Back Home Arrow & Extended Hamburger Menu (Only when not notifications tab) */}
+          {activeTab !== 'notifications' && (
+            <div className="md:hidden flex items-center justify-between mb-5 border-b border-gold/20 pb-3 px-1 sm:px-6">
+              <div className="flex items-center gap-4">
+                {/* Back Home Arrow directly linking admin back */}
+                <button 
+                  onClick={onNavigateHome}
+                  className="text-gold hover:text-white transition-colors p-1 cursor-pointer group"
+                  title="Back to Website Home"
+                >
+                  <ArrowLeft size={24} className="group-hover:-translate-x-0.5 transition-transform" />
+                </button>
 
-              {/* Hamburger Menu extended and positioned slightly to the right */}
-              <button 
-                onClick={() => setIsSidebarOpen(true)}
-                className="text-gray-300 hover:text-gold transition-colors p-1 cursor-pointer ml-1 relative"
-                title="Open Admin Navigation Menu"
-              >
-                <Menu size={24} />
-                {unreadNotificationsCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-600 text-white font-mono text-[8px] font-extrabold rounded-full min-w-[15px] h-[15px] px-0.5 flex items-center justify-center border border-black-pure shadow-md animate-pulse">
-                    {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
-                  </span>
-                )}
-              </button>
+                {/* Hamburger Menu extended and positioned slightly to the right */}
+                <button 
+                  onClick={() => setIsSidebarOpen(true)}
+                  className="text-gray-300 hover:text-gold transition-colors p-1 cursor-pointer ml-1 relative"
+                  title="Open Admin Navigation Menu"
+                >
+                  <Menu size={24} />
+                  {unreadNotificationsCount > 0 && (
+                    <span className="absolute -top-1 -right-1 z-10 bg-red-600 text-white font-mono text-[9px] font-bold rounded-full w-4.5 h-4.5 min-w-[18px] min-h-[18px] aspect-square flex items-center justify-center p-0 leading-none shadow-md animate-pulse border-0 outline-none ring-0 pointer-events-none">
+                      {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              <span className="text-gold font-mono text-[10px] uppercase tracking-widest px-3 py-1 bg-gold/10 border border-gold/20 rounded">
+                {activeTab === 'services' ? 'Our Services' : activeTab === 'users' ? 'User Directory' : activeTab === 'sections' ? 'Section Content' : activeTab === 'communications' ? 'Email & WhatsApp' : activeTab === 'settings' ? 'Security & Passcode' : activeTab}
+              </span>
             </div>
-
-            <span className="text-gold font-mono text-[10px] uppercase tracking-widest px-3 py-1 bg-gold/10 border border-gold/20 rounded">
-              {activeTab === 'services' ? 'Our Services' : activeTab === 'users' ? 'User Directory' : activeTab === 'sections' ? 'Section Content' : activeTab}
-            </span>
-          </div>
+          )}
 
           <div className="px-0 sm:px-2 md:px-0 w-full">
             {/* TAB 1: PROJECTS & CREATIONS */}
@@ -3877,17 +4171,17 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     No cards matching the search query in this section.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3.5 lg:gap-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 w-full">
                     {visibleSectionCards.map((card, cIdx) => (
                       <div 
                         key={card.id ? `${card.id}-${cIdx}` : `card-${cIdx}`} 
                         className={`bg-black-pure border ${
                           editingCardMeta?.id === card.id 
-                            ? 'border-gold shadow-[0_0_20px_rgba(212,175,55,0.6)] ring-1 ring-gold' 
-                            : 'border-gold/30 lg:border-gold/40'
-                        } group relative overflow-hidden flex flex-col justify-between hover:border-gold transition-all duration-300 shadow-md hover:shadow-[0_12px_28px_rgba(0,0,0,0.8)] rounded-none`}
+                            ? 'border-gold shadow-[0_0_24px_rgba(212,175,55,0.7)] ring-1 ring-gold' 
+                            : 'border-gold/30 hover:border-gold'
+                        } group relative overflow-hidden flex flex-col justify-between transition-all duration-300 shadow-md hover:shadow-[0_12px_28px_rgba(0,0,0,0.85)] rounded-none w-full`}
                       >
-                        <div className="h-28 xs:h-32 sm:h-36 md:h-40 lg:h-32 xl:h-36 overflow-hidden relative bg-black-rich">
+                        <div className="h-28 sm:h-32 md:h-36 lg:h-32 xl:h-36 overflow-hidden relative bg-black-rich">
                           <img 
                             src={card.image} 
                             alt={card.title} 
@@ -3896,12 +4190,12 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                           <div className="absolute inset-0 bg-gradient-to-t from-black-pure via-transparent to-transparent opacity-60 pointer-events-none"></div>
                           
                           {/* Section & Status Badges */}
-                          <div className="absolute top-1.5 left-1.5 z-20 flex flex-col gap-1 pointer-events-none">
-                            <span className="bg-black-pure/90 border border-gold/60 text-gold text-[7px] uppercase tracking-wider font-mono font-bold px-1.5 py-0.5">
+                          <div className="absolute top-1.5 left-1.5 z-20 flex flex-wrap gap-1 pointer-events-none">
+                            <span className="bg-black-pure/95 border border-gold/70 text-gold text-[8px] sm:text-[9px] uppercase tracking-wider font-mono font-bold px-1.5 py-0.5 shadow-sm truncate max-w-[120px]">
                               {card.sectionLabel || card.section}
                             </span>
                             {card.isEdited && (
-                              <span className="bg-amber-500 text-black-pure text-[7px] uppercase tracking-wider font-mono font-extrabold px-1.5 py-0.5 shadow-sm">
+                              <span className="bg-amber-500 text-black-pure text-[8px] uppercase tracking-wider font-mono font-extrabold px-1.5 py-0.5 shadow-sm">
                                 Edited
                               </span>
                             )}
@@ -3915,10 +4209,11 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                                 e.stopPropagation();
                                 handleStartEditCard(card);
                               }}
-                              className="bg-black-pure/95 hover:bg-gold hover:text-black-pure text-gold p-1.5 border border-gold/60 transition-all cursor-pointer shadow-md"
+                              className="bg-black-pure/95 hover:bg-gold hover:text-black-pure text-gold p-1 sm:px-2 sm:py-1 border border-gold/70 transition-all cursor-pointer shadow-md text-[10px] sm:text-xs flex items-center gap-1 font-mono font-semibold"
                               title="Edit this card"
                             >
-                              <Edit3 size={13} />
+                              <Edit3 size={11} />
+                              <span className="hidden sm:inline">Edit</span>
                             </button>
                             <button 
                               type="button"
@@ -3930,32 +4225,34 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                                 card.isBase 
                                   ? 'bg-neutral-900 hover:bg-neutral-700 text-amber-300 border border-amber-500/50' 
                                   : 'bg-red-950/90 hover:bg-red-700 text-white border border-red-500'
-                              } p-1.5 transition-all cursor-pointer shadow-md`}
+                              } p-1 transition-all cursor-pointer shadow-md`}
                               title={card.isBase ? (card.isEdited ? 'Reset edits to default' : 'Revert') : 'Delete creation'}
                             >
-                              {card.isBase ? <RotateCcw size={13} /> : <Trash2 size={13} />}
+                              {card.isBase ? <RotateCcw size={11} /> : <Trash2 size={11} />}
                             </button>
                           </div>
                         </div>
 
                         <div className="p-2 sm:p-2.5 lg:p-3 flex-1 flex flex-col justify-between">
                           <div>
-                            <span className="text-gold text-[8px] sm:text-[9px] uppercase tracking-widest font-mono block mb-0.5 truncate">
+                            <span className="text-gold text-[9px] sm:text-[10px] uppercase tracking-widest font-mono font-semibold block mb-0.5 truncate">
                               {card.category}
                             </span>
-                            <h4 className="text-white font-medium text-xs line-clamp-1">{card.title}</h4>
-                            <p className="text-gray-400 text-[10px] line-clamp-2 mt-0.5">{card.desc}</p>
+                            <h4 className="text-white font-medium text-xs sm:text-sm line-clamp-1 group-hover:text-gold transition-colors" title={card.title}>
+                              {card.title}
+                            </h4>
+                            <p className="text-gray-400 text-[11px] line-clamp-2 mt-0.5 leading-relaxed font-light">{card.desc}</p>
                           </div>
 
-                          <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-[9px] text-gray-400 font-mono">
+                          <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-[11px] text-gray-400 font-mono">
                             <button
                               type="button"
                               onClick={() => handleStartEditCard(card)}
-                              className="text-gold hover:text-white flex items-center gap-1 text-[10px] font-bold cursor-pointer"
+                              className="text-gold hover:text-white flex items-center gap-1 font-bold cursor-pointer transition-colors text-[10px] sm:text-xs"
                             >
-                              <Edit3 size={10} /> Edit Card
+                              <Edit3 size={11} /> <span>Edit</span>
                             </button>
-                            <span className="text-emerald-400 flex items-center gap-1 shrink-0">
+                            <span className="text-emerald-400 flex items-center gap-1 shrink-0 text-[10px]">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Live
                             </span>
                           </div>
@@ -4341,11 +4638,11 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     </button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 w-full">
                     {allCombinedServices.map((service, idx) => (
                       <div 
                         key={service.id ? `${service.id}-${idx}` : `svc-${idx}`} 
-                        className="bg-black-pure border border-gold/30 hover:border-gold p-3 sm:p-3.5 flex flex-col justify-between relative group transition-all duration-300 shadow-md hover:shadow-[0_4px_20px_rgba(212,175,55,0.15)]"
+                        className="bg-black-pure border border-gold/30 hover:border-gold p-2.5 sm:p-3 flex flex-col justify-between relative group transition-all duration-300 shadow-md hover:shadow-[0_12px_28px_rgba(0,0,0,0.85)] w-full"
                       >
                         <div className="flex-1 flex flex-col">
                           {/* Card Top Meta & Status */}
@@ -4355,17 +4652,17 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                             </span>
                             <div className="flex items-center gap-1">
                               {service.isCustom && (
-                                <span className="text-[8px] font-mono px-1 py-0.5 bg-emerald-900/60 border border-emerald-500/50 text-emerald-300 uppercase">
+                                <span className="text-[8px] font-mono px-1.5 py-0.5 bg-emerald-900/60 border border-emerald-500/50 text-emerald-300 uppercase font-semibold">
                                   Custom
                                 </span>
                               )}
                               {service.isEdited && (
-                                <span className="text-[8px] font-mono px-1 py-0.5 bg-amber-900/60 border border-amber-500/50 text-amber-300 uppercase">
+                                <span className="text-[8px] font-mono px-1.5 py-0.5 bg-amber-900/60 border border-amber-500/50 text-amber-300 uppercase font-semibold">
                                   Edited
                                 </span>
                               )}
                               {service.isBase && !service.isEdited && (
-                                <span className="text-[8px] font-mono px-1 py-0.5 bg-white/5 border border-white/10 text-gray-400 uppercase">
+                                <span className="text-[8px] font-mono px-1.5 py-0.5 bg-white/5 border border-white/10 text-gray-400 uppercase">
                                   Base
                                 </span>
                               )}
@@ -4374,7 +4671,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
 
                           {/* Image preview if exists, or architectural icon thumbnail */}
                           {service.image ? (
-                            <div className="relative aspect-[16/10] overflow-hidden bg-black-rich mb-2 border border-gold/20">
+                            <div className="relative aspect-[16/10] max-h-24 sm:max-h-28 overflow-hidden bg-black-rich mb-2 border border-gold/30">
                               <img
                                 src={service.image}
                                 alt={service.title}
@@ -4384,7 +4681,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                               <div className="absolute inset-0 bg-gradient-to-t from-black-pure/70 via-transparent to-transparent" />
                             </div>
                           ) : (
-                            <div className="h-12 bg-black-rich/60 border border-white/5 flex items-center justify-center mb-2 group-hover:border-gold/30 transition-colors">
+                            <div className="h-12 sm:h-14 bg-black-rich/70 border border-white/10 flex items-center justify-center mb-2 group-hover:border-gold/40 transition-colors">
                               {renderDisciplineIcon(service.icon, 20)}
                             </div>
                           )}
@@ -4395,38 +4692,36 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                           </h4>
 
                           {/* Service Description */}
-                          <p className="text-gray-400 text-[10px] sm:text-[11px] leading-relaxed line-clamp-2 mb-2 font-light">
+                          <p className="text-gray-300 text-[11px] leading-relaxed line-clamp-2 mb-2 font-light">
                             {service.description}
                           </p>
 
                           {/* Key Features Count or Sample */}
                           {service.features && Array.isArray(service.features) && service.features.length > 0 && (
                             <div className="mb-2 text-[10px] text-gray-400 font-mono flex items-center gap-1 truncate">
-                              <span className="w-1.5 h-1.5 rounded-full bg-gold shrink-0"></span>
+                              <span className="w-1 h-1 rounded-full bg-gold shrink-0"></span>
                               <span className="truncate">{service.features[0]}</span>
-                              {service.features.length > 1 && (
-                                <span className="text-gray-500 shrink-0">+{service.features.length - 1}</span>
-                              )}
                             </div>
                           )}
                         </div>
 
                         {/* Actions Toolbar */}
-                        <div className="pt-2 mt-auto border-t border-white/10 space-y-2">
+                        <div className="pt-2 mt-auto border-t border-white/10 space-y-1.5">
                           <div className="grid grid-cols-3 gap-1">
                             {/* Promote / Move to Top */}
                             {idx > 0 ? (
                               <button
                                 type="button"
                                 onClick={() => handlePromoteService(service)}
-                                className="bg-black-rich hover:bg-gold hover:text-black-pure text-gray-300 py-1 flex items-center justify-center border border-white/20 hover:border-gold transition-colors cursor-pointer text-[10px]"
+                                className="bg-black-rich hover:bg-gold hover:text-black-pure text-gray-300 py-1 px-1 flex items-center justify-center gap-0.5 border border-white/20 hover:border-gold transition-colors cursor-pointer text-[10px] font-mono font-medium"
                                 title="Elevate to Position #1 at top"
                               >
-                                <ArrowUp size={13} />
+                                <ArrowUp size={11} />
+                                <span className="hidden sm:inline">Top</span>
                               </button>
                             ) : (
                               <div className="bg-gold/15 border border-gold/40 text-gold py-1 flex items-center justify-center text-[9px] font-mono font-bold" title="Currently Top Priority">
-                                #1 TOP
+                                #1
                               </div>
                             )}
 
@@ -4434,30 +4729,32 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                             <button
                               type="button"
                               onClick={() => handleEditService(service)}
-                              className="bg-black-rich hover:bg-gold hover:text-black-pure text-gold py-1 flex items-center justify-center border border-gold/40 transition-colors shadow cursor-pointer text-[10px]"
+                              className="bg-black-rich hover:bg-gold hover:text-black-pure text-gold py-1 px-1 flex items-center justify-center gap-0.5 border border-gold/40 transition-colors shadow cursor-pointer text-[10px] font-mono font-semibold"
                               title="Edit this service"
                             >
-                              <Edit3 size={13} />
+                              <Edit3 size={11} />
+                              <span className="hidden sm:inline">Edit</span>
                             </button>
 
                             {/* Delete or Hide Button */}
                             <button
                               type="button"
                               onClick={() => handleDeleteOrHideService(service)}
-                              className="bg-red-950/80 hover:bg-red-700 text-white py-1 flex items-center justify-center border border-red-500/50 transition-colors shadow cursor-pointer text-[10px]"
+                              className="bg-red-950/80 hover:bg-red-700 text-white py-1 px-1 flex items-center justify-center gap-0.5 border border-red-500/50 transition-colors shadow cursor-pointer text-[10px] font-mono"
                               title={service.isBase ? "Hide from website" : "Delete service"}
                             >
-                              <Trash2 size={13} />
+                              <Trash2 size={11} />
+                              <span className="hidden sm:inline">Hide</span>
                             </button>
                           </div>
 
                           {/* Footer Discipline & Live status */}
-                          <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-gray-400 font-mono pt-1">
+                          <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-gray-400 font-mono pt-0.5">
                             <span className="text-gray-400 truncate mr-1 flex items-center gap-1" title={DISCIPLINE_OPTIONS.find(d => d.value === service.icon)?.label || service.icon || 'Gypsum & Fine Wall Finishes'}>
                               {renderDisciplineIcon(service.icon, 11)}
                               <span className="truncate">{DISCIPLINE_OPTIONS.find(d => d.value === service.icon)?.label?.split(' ')[0] || 'Gypsum'}</span>
                             </span>
-                            <span className="text-emerald-400 flex items-center gap-0.5 shrink-0">
+                            <span className="text-emerald-400 flex items-center gap-0.5 shrink-0 font-medium">
                               <Eye size={10} /> Live
                             </span>
                           </div>
@@ -4480,12 +4777,45 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     Client Leads & Quote Requests
                   </h2>
                 </div>
-                <div className="text-right hidden sm:block">
-                  <span className="text-sm font-mono text-white bg-white/5 border border-white/10 px-3 py-1.5 inline-block">
-                    Total Leads: <span className="text-gold font-bold">{leads.length}</span>
-                  </span>
+                <div className="flex items-center gap-3">
+                  <ExportButton
+                    data={leads}
+                    columns={[
+                      { header: 'Client Name', key: 'name' },
+                      { header: 'Email Address', key: 'email' },
+                      { header: 'Phone Number', key: 'phone' },
+                      { header: 'Service Requested', key: 'service' },
+                      { header: 'Property Type', key: 'propertyType' },
+                      { header: 'Estimated Budget', key: 'budget' },
+                      { header: 'Timeline', key: 'timeline' },
+                      { header: 'Specific Notes / Scope', key: 'details' },
+                      { header: 'Submission Date', key: 'createdAt', format: (l: any) => l.createdAt ? new Date(l.createdAt).toLocaleDateString() : 'Recent' }
+                    ]}
+                    title="Natal Interior Design - Client Leads & Quotations"
+                    subtitle="Detailed record of prospective client project proposals and quote submissions"
+                    category="Leads & Quotations"
+                    filenamePrefix="natal_leads_quotes"
+                    summaryCards={[
+                      { label: 'Total Inquiries', value: leads.length },
+                      { label: 'High Budget', value: leads.filter((l: any) => l.budget && l.budget.includes('$50,000')).length },
+                      { label: 'Villas & Penthouses', value: leads.filter((l: any) => l.propertyType && (l.propertyType.includes('Villa') || l.propertyType.includes('Penthouse'))).length }
+                    ]}
+                    buttonLabel="Export Leads"
+                  />
+                  <div className="text-right hidden sm:block">
+                    <span className="text-sm font-mono text-white bg-white/5 border border-white/10 px-3 py-1.5 inline-block">
+                      Total Leads: <span className="text-gold font-bold">{leads.length}</span>
+                    </span>
+                  </div>
                 </div>
               </div>
+
+              {/* Client Engagement 30-Day Metrics Visualization */}
+              <ClientEngagementMetricsChart
+                leads={leads}
+                users={users}
+                userActivities={userActivities}
+              />
 
               {leads.length === 0 ? (
                 <div className="p-12 text-center bg-black-pure/50 border border-gold/20">
@@ -4494,19 +4824,19 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   <p className="text-xs text-gray-500 mt-1">When clients fill out the "Request a Quote" form, their details will appear here.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                   {leads.map((lead, lIdx) => (
-                    <div key={lead.id ? `${lead.id}-${lIdx}` : `lead-${lIdx}`} className="bg-black-pure border border-gold/30 p-5 flex flex-col justify-between hover:border-gold/50 transition-colors">
+                    <div key={lead.id ? `${lead.id}-${lIdx}` : `lead-${lIdx}`} className="bg-[#0f0f0f] border border-white/10 hover:border-gold/30 rounded-sm p-4 sm:p-5 flex flex-col justify-between transition-colors shadow-sm">
                       <div>
                         <div className="flex items-start justify-between gap-2 border-b border-white/10 pb-3 mb-3">
                           <div>
                             <h4 className="text-white font-bold text-base line-clamp-1">{lead.name || 'Client Lead'}</h4>
-                            <span className="text-gold text-[10px] uppercase tracking-widest font-mono mt-0.5 inline-block bg-gold/10 px-1.5 py-0.5 border border-gold/20">
+                            <span className="text-gold text-[10px] uppercase tracking-widest font-mono mt-0.5 inline-block bg-white/5 px-2 py-0.5 border border-white/10">
                               {lead.service || 'General Inquiry'}
                             </span>
                           </div>
                           <div className="flex flex-col items-end gap-2">
-                            <span className="text-gray-400 text-[10px] font-mono whitespace-nowrap bg-white/5 px-1.5 py-0.5">
+                            <span className="text-gray-400 text-[10px] font-mono whitespace-nowrap bg-white/5 px-1.5 py-0.5 border border-white/10">
                               {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : 'Recent'}
                             </span>
                             <button 
@@ -4527,10 +4857,10 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                                   console.error("Error deleting lead:", e);
                                 }
                               }}
-                              className="text-red-500 hover:text-white hover:bg-red-900/60 p-1 transition-colors cursor-pointer border border-transparent hover:border-red-500 rounded-sm"
+                              className="text-gray-500 hover:text-red-400 hover:bg-red-950/40 p-1.5 transition-colors cursor-pointer border border-transparent hover:border-red-500/30 rounded-sm"
                               title="Delete Lead"
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={13} />
                             </button>
                           </div>
                         </div>
@@ -4551,7 +4881,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                         </div>
 
                         {lead.details && (
-                          <div className="bg-black-rich p-3 border border-white/5 text-xs text-gray-300">
+                          <div className="bg-[#141414] p-3 border border-white/5 text-xs text-gray-300">
                             <span className="text-gray-500 font-mono text-[10px] uppercase block mb-1">Project Details:</span>
                             <p className="line-clamp-4 leading-relaxed">{lead.details}</p>
                           </div>
@@ -4559,10 +4889,10 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
 
                         {/* Client Attached Blueprint, Photo or Video */}
                         {lead.fileAttachment && (
-                          <div className="mt-3 p-2.5 bg-black-rich border border-gold/40 flex items-center justify-between gap-2 shadow-inner">
+                          <div className="mt-3 p-2.5 bg-[#141414] border border-white/10 flex items-center justify-between gap-2 shadow-inner">
                             <div className="flex items-center gap-2 overflow-hidden min-w-0">
                               {lead.fileAttachment.type === 'video' ? (
-                                <div className="w-9 h-9 relative bg-black border border-gold/40 flex items-center justify-center shrink-0 overflow-hidden">
+                                <div className="w-9 h-9 relative bg-black border border-white/10 flex items-center justify-center shrink-0 overflow-hidden">
                                   {lead.fileAttachment.thumbnail ? (
                                     <img src={lead.fileAttachment.thumbnail} alt="" className="w-full h-full object-cover opacity-60" />
                                   ) : null}
@@ -4572,10 +4902,10 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                                 <img 
                                   src={lead.fileAttachment.thumbnail || lead.fileAttachment.data} 
                                   alt="" 
-                                  className="w-9 h-9 object-cover border border-gold/40 shrink-0" 
+                                  className="w-9 h-9 object-cover border border-white/10 shrink-0" 
                                 />
                               ) : (
-                                <div className="w-9 h-9 bg-gold/10 border border-gold/40 flex items-center justify-center text-gold shrink-0">
+                                <div className="w-9 h-9 bg-white/5 border border-white/10 flex items-center justify-center text-gold shrink-0">
                                   <FileText size={16} />
                                 </div>
                               )}
@@ -4593,7 +4923,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                             <button
                               type="button"
                               onClick={() => setLeadAttachmentModal({ ...lead.fileAttachment, clientName: lead.name })}
-                              className="px-2 py-1 bg-gold/20 hover:bg-gold text-gold hover:text-black-pure border border-gold/50 text-[10px] font-mono font-bold flex items-center gap-1 transition-all shrink-0 cursor-pointer"
+                              className="px-2 py-1 bg-white/5 hover:bg-gold text-gold hover:text-black border border-white/10 text-[10px] font-mono font-bold flex items-center gap-1 transition-all shrink-0 cursor-pointer"
                             >
                               {lead.fileAttachment.type === 'video' ? (
                                 <>
@@ -4609,17 +4939,67 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                         )}
                       </div>
                       
-                      <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
-                         <span className="text-[10px] font-mono text-gray-500 uppercase flex items-center gap-1.5">
-                           <CheckCircle size={12} className="text-emerald-500/70" />
-                           Received
-                         </span>
-                         <a 
-                           href={`mailto:${lead.email}?subject=Re: Natal Interior Design Inquiry`}
-                           className="text-gold text-[10px] uppercase font-bold font-mono tracking-wider hover:text-white transition-colors"
-                         >
-                           Reply via Email &rarr;
-                         </a>
+                      {/* WhatsApp Dispatch & Delivery Status */}
+                      {lead.whatsappDeliveryStatus === 'gateway_rejected_invalid_key' && (
+                        <div className="mt-3 p-2 bg-[#141414] border border-white/10 rounded-sm text-[11px] text-amber-200 flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5 font-mono text-[10px]">
+                            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                            <span>Background bot not authorized. Tap below to send directly.</span>
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="mt-4 pt-3 border-t border-white/5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* 1-Click Send to Owner WhatsApp */}
+                          <a
+                            href={getOwnerWhatsAppUrl({
+                              id: lead.id,
+                              leadType: (lead.service && lead.service !== 'General Inquiry') ? 'Quotation Request' : 'Consultation Lead',
+                              name: lead.name,
+                              phone: lead.phone,
+                              email: lead.email,
+                              service: lead.service,
+                              details: lead.details,
+                              timestamp: lead.createdAt
+                            })}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gold hover:bg-gold-light text-black font-bold font-mono text-[11px] uppercase tracking-wider rounded-sm transition-all shadow-sm"
+                            title={`Send full lead summary directly to studio owner (${whatsappConfig.ownerWhatsAppNumber})`}
+                          >
+                            <MessageSquare size={13} />
+                            <span>Send to Owner WhatsApp</span>
+                          </a>
+
+                          {/* 1-Click Chat with Client on WhatsApp */}
+                          {lead.phone && (
+                            <a
+                              href={getClientWhatsAppReplyUrl(lead.phone, lead.name, lead.service)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black-pure border border-white/20 hover:border-gold text-gray-200 hover:text-white font-bold font-mono text-[11px] uppercase tracking-wider rounded-sm transition-all"
+                              title="Chat directly with client on WhatsApp"
+                            >
+                              <span>Chat Client</span>
+                            </a>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between sm:justify-end gap-3 pt-1 sm:pt-0">
+                          <span className="text-[10px] font-mono text-gray-500 uppercase flex items-center gap-1.5">
+                            <CheckCircle size={12} className="text-emerald-500/70" />
+                            In Database
+                          </span>
+                          {lead.email && (
+                            <a 
+                              href={`mailto:${lead.email}?subject=Re: Natal Interior Design Inquiry`}
+                              className="text-gold text-[10px] uppercase font-bold font-mono tracking-wider hover:text-white transition-colors"
+                            >
+                              Email &rarr;
+                            </a>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -4796,9 +5176,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   <p className="text-xs text-gray-500 mt-1">Client testimonials will appear here.</p>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                   {testimonials.map((testimonial, tIdx) => (
-                    <div key={testimonial.id ? `${testimonial.id}-${tIdx}` : `testimonial-${tIdx}`} className="bg-black-pure border border-gold/30 p-5 space-y-3 relative group">
+                    <div key={testimonial.id ? `${testimonial.id}-${tIdx}` : `testimonial-${tIdx}`} className="bg-[#0f0f0f] border border-white/10 hover:border-gold/30 rounded-sm p-4 sm:p-5 space-y-3 relative group transition-colors shadow-sm flex flex-col justify-between">
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-3">
                         <div className="flex items-center gap-4">
                            {testimonial.image && (
@@ -4951,41 +5331,47 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   <p className="text-xs text-gray-500 mt-1">Before & After slider items will appear here.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 w-full">
                   {transformations.map((tr, trIdx) => (
-                    <div key={tr.id ? `${tr.id}-${trIdx}` : `tr-${trIdx}`} className="bg-black-pure border border-gold/30 p-4 space-y-3 relative group shadow-lg">
-                      <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-3">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-white font-bold text-sm tracking-wider uppercase">{tr.title}</h4>
+                    <div key={tr.id ? `${tr.id}-${trIdx}` : `tr-${trIdx}`} className="bg-black-pure border border-gold/30 hover:border-gold p-2.5 sm:p-3 space-y-2.5 relative group shadow-md hover:shadow-[0_12px_28px_rgba(0,0,0,0.85)] transition-all w-full flex flex-col justify-between">
+                      <div className="flex items-center justify-between gap-1 border-b border-white/10 pb-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <h4 className="text-white font-heading font-bold text-xs uppercase tracking-wider truncate" title={tr.title}>{tr.title}</h4>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
                           <button
                             type="button"
                             onClick={() => handleToggleTrMode(tr.id, tr.fitMode)}
-                            className={`px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider rounded border transition-colors cursor-pointer ${
+                            className={`px-1.5 py-0.5 text-[8px] font-mono uppercase tracking-wider rounded border transition-colors cursor-pointer ${
                               tr.fitMode === 'contain'
-                                ? 'bg-blue-500/10 text-blue-300 border-blue-500/30 hover:bg-blue-500/20'
-                                : 'bg-gold/10 text-gold border-gold/30 hover:bg-gold/20'
+                                ? 'bg-blue-500/15 text-blue-300 border-blue-500/40 hover:bg-blue-500/25'
+                                : 'bg-gold/15 text-gold border-gold/40 hover:bg-gold/25'
                             }`}
-                            title="Click to toggle between Fill and Fit mode"
+                            title="Toggle Fit/Fill mode"
                           >
-                            {tr.fitMode === 'contain' ? 'Fit Mode' : 'Fill Mode'}
+                            {tr.fitMode === 'contain' ? 'Fit' : 'Fill'}
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteTransformation(tr.id)}
+                            className="p-1 rounded bg-red-950/50 text-red-400 hover:bg-red-900/70 hover:text-red-200 transition-colors cursor-pointer border border-red-500/30"
+                            title="Delete Transformation"
+                          >
+                            <Trash2 size={11} />
                           </button>
                         </div>
-                        <button 
-                          onClick={() => handleDeleteTransformation(tr.id)}
-                          className="w-8 h-8 rounded-full bg-red-950/40 text-red-400 flex items-center justify-center hover:bg-red-900/60 hover:text-red-200 transition-colors cursor-pointer"
-                          title="Delete Transformation"
-                        >
-                          <Trash2 size={14} />
-                        </button>
                       </div>
                       
-                      <div className="grid grid-cols-2 gap-3 h-44 sm:h-48">
-                        <div className="relative border border-white/10 group-hover:border-gold/30 transition-colors bg-black-pure overflow-hidden flex items-center justify-center p-1">
-                          <span className="absolute top-2 left-2 bg-black-pure/90 text-white text-[10px] uppercase tracking-widest px-2 py-0.5 z-10 font-mono font-bold border border-white/20">Before</span>
+                      <div className="flex flex-col gap-2">
+                        <div className="relative border border-white/10 group-hover:border-gold/30 transition-colors bg-black-pure overflow-hidden h-28 sm:h-32 p-1 shadow-inner">
+                          <span className="absolute top-1 left-1 bg-black-pure/95 text-white text-[8px] uppercase tracking-wider px-1.5 py-0.5 z-10 font-mono font-bold border border-white/20 shadow-sm">
+                            Before
+                          </span>
                           <img src={tr.beforeImage} alt="Before" className={`w-full h-full ${tr.fitMode === 'cover' ? 'object-cover' : 'object-contain'}`} />
                         </div>
-                        <div className="relative border border-white/10 group-hover:border-gold/30 transition-colors bg-black-pure overflow-hidden flex items-center justify-center p-1">
-                          <span className="absolute top-2 left-2 bg-black-pure/90 text-gold text-[10px] uppercase tracking-widest px-2 py-0.5 z-10 font-mono font-bold border border-gold/30">After</span>
+                        <div className="relative border border-white/10 group-hover:border-gold/30 transition-colors bg-black-pure overflow-hidden h-28 sm:h-32 p-1 shadow-inner">
+                          <span className="absolute top-1 left-1 bg-black-pure/95 text-gold text-[8px] uppercase tracking-wider px-1.5 py-0.5 z-10 font-mono font-bold border border-gold/40 shadow-sm">
+                            After
+                          </span>
                           <img src={tr.afterImage} alt="After" className={`w-full h-full ${tr.fitMode === 'cover' ? 'object-cover' : 'object-contain'}`} />
                         </div>
                       </div>
@@ -4997,270 +5383,607 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           )}
 
           {/* TAB 5: NOTIFICATIONS & ALERTS */}
-          {activeTab === 'notifications' && (
-            <div className="space-y-6 max-w-5xl">
-              <div className="border-b border-gold/20 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-gold uppercase tracking-widest">Executive Feeds</span>
-                    {unreadNotificationsCount > 0 ? (
-                      <span className="px-2.5 py-0.5 bg-red-600/25 text-red-300 border border-red-500/50 rounded-full text-[10px] font-mono font-bold flex items-center gap-1.5 animate-pulse">
+          {activeTab === 'notifications' && (() => {
+            // Build unified notification alerts stream
+            const allAlerts: any[] = [];
+
+            // 1. CRM Leads & Inquiries
+            leads.forEach((l: any, idx: number) => {
+              const id = l.id || `lead_${l.email || l.phone || idx}`;
+              const isUnread = !readNotificationIds.includes(id);
+              const leadTime = parseTimestampToMs(l.createdAt) || (Date.now() - (idx * 3600000));
+              allAlerts.push({
+                id,
+                category: 'lead',
+                typeLabel: 'CRM Inquiry',
+                title: l.name || 'Direct Lead Inquiry',
+                badge: l.service || 'Interior Consultation Request',
+                details: l.message || l.details || 'New consultation inquiry submitted via website form.',
+                email: l.email || '',
+                phone: l.phone || '',
+                service: l.service || '',
+                source: l.source || 'Website Form',
+                directWhatsAppUrl: l.phone ? `https://wa.me/${l.phone.replace(/\D/g, '')}` : '',
+                timestamp: leadTime,
+                isUnread,
+                targetTab: 'leads' as AdminTabType
+              });
+            });
+
+            // 2. VIP Client Registrations
+            users.forEach((u: any, idx: number) => {
+              if (!u.isAdmin && !u.email?.toLowerCase().includes('admin') && u.role !== 'Administrator') {
+                const id = u.id || `user_${u.email || idx}`;
+                const isUnread = !readNotificationIds.includes(id);
+                const userTime = getUserTimestamp(u) || (Date.now() - (idx * 7200000));
+                allAlerts.push({
+                  id,
+                  category: 'user',
+                  typeLabel: 'VIP Client',
+                  title: u.name || 'VIP Client Registration',
+                  badge: u.role || 'VIP Client Account',
+                  details: u.service ? `Inquiry / Service: ${u.service}` : (u.source ? `Source: ${u.source}` : 'New client profile registered in directory.'),
+                  email: u.email || '',
+                  phone: u.phone || '',
+                  service: u.service || '',
+                  source: u.source || 'Registration Portal',
+                  directWhatsAppUrl: u.phone ? `https://wa.me/${u.phone.replace(/\D/g, '')}` : '',
+                  timestamp: userTime,
+                  isUnread,
+                  targetTab: 'users' as AdminTabType
+                });
+              }
+            });
+
+            // 3. Automated WhatsApp Dispatches from Database
+            whatsappDispatches.forEach((rec: any, idx: number) => {
+              const id = rec.id || `wa_${rec.createdAt || idx}`;
+              const isUnread = !readNotificationIds.includes(id);
+              const waTime = parseTimestampToMs(rec.createdAt) || Date.now();
+              allAlerts.push({
+                id,
+                category: 'whatsapp',
+                typeLabel: 'WhatsApp Alert',
+                title: `${rec.activityType || 'WhatsApp Dispatch'}: ${rec.clientName || 'Visitor'}`,
+                badge: rec.service || 'Automated Phone Alert',
+                details: rec.details || rec.service || rec.message || 'Database automated alert dispatched directly to WhatsApp.',
+                email: rec.clientEmail || '',
+                phone: rec.clientPhone || rec.recipientPhone || '',
+                service: rec.service || '',
+                source: 'WhatsApp Gateway',
+                directWhatsAppUrl: rec.directWhatsAppUrl || (rec.clientPhone ? `https://wa.me/${rec.clientPhone.replace(/\D/g, '')}` : ''),
+                timestamp: waTime,
+                isUnread,
+                targetTab: 'communications' as AdminTabType
+              });
+            });
+
+            // Deduplicate by ID
+            const seenIds = new Set<string>();
+            const uniqueAlerts: any[] = [];
+            for (const item of allAlerts) {
+              if (!seenIds.has(item.id)) {
+                seenIds.add(item.id);
+                uniqueAlerts.push(item);
+              }
+            }
+
+            // Sort notifications: Prioritize new user registrations at the top of the list!
+            uniqueAlerts.sort((a, b) => {
+              const isUserA = a.category === 'user';
+              const isUserB = b.category === 'user';
+
+              // 1. New users are placed at the top of the notifications list
+              if (isUserA && !isUserB) return -1;
+              if (!isUserA && isUserB) return 1;
+
+              // 2. Unread alerts first
+              if (a.isUnread && !b.isUnread) return -1;
+              if (!a.isUnread && b.isUnread) return 1;
+
+              // 3. Newest timestamp first
+              const timeA = typeof a.timestamp === 'number' ? a.timestamp : 0;
+              const timeB = typeof b.timestamp === 'number' ? b.timestamp : 0;
+              return timeB - timeA;
+            });
+
+            // Filter
+            const filteredList = uniqueAlerts.filter(item => {
+              if (notificationFilter === 'unread' && !item.isUnread) return false;
+              if (notificationFilter === 'leads' && item.category !== 'lead') return false;
+              if (notificationFilter === 'users' && item.category !== 'user') return false;
+              if (notificationFilter === 'whatsapp' && item.category !== 'whatsapp') return false;
+
+              if (notificationSearch.trim()) {
+                const q = notificationSearch.toLowerCase();
+                const match = 
+                  item.title?.toLowerCase().includes(q) ||
+                  item.email?.toLowerCase().includes(q) ||
+                  item.phone?.toLowerCase().includes(q) ||
+                  item.service?.toLowerCase().includes(q) ||
+                  item.details?.toLowerCase().includes(q) ||
+                  item.source?.toLowerCase().includes(q);
+                if (!match) return false;
+              }
+              return true;
+            });
+
+            const unreadCountInList = uniqueAlerts.filter(a => a.isUnread).length;
+            const leadsCountInList = uniqueAlerts.filter(a => a.category === 'lead').length;
+            const usersCountInList = uniqueAlerts.filter(a => a.category === 'user').length;
+            const waCountInList = uniqueAlerts.filter(a => a.category === 'whatsapp').length;
+
+            return (
+              <div className="w-full space-y-6">
+                {/* Header: Title, Unread Indicator, Mark Read & Refresh */}
+                <div className="border-b border-gold/20 pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-[10px] font-mono text-gold uppercase tracking-widest font-semibold">Executive Feeds</span>
+                      {unreadNotificationsCount > 0 ? (
+                        <span className="px-3 py-0.5 bg-red-600/20 text-red-400 border border-red-500/50 rounded-full text-[10px] font-mono font-bold flex items-center gap-1.5 shadow-[0_0_10px_rgba(239,68,68,0.35)]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                          <span>{unreadNotificationsCount} New Unread Alert{unreadNotificationsCount !== 1 ? 's' : ''}</span>
+                        </span>
+                      ) : (
+                        <span className="px-3 py-0.5 bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 rounded-full text-[10px] font-mono font-bold flex items-center gap-1.5">
+                          <CheckCircle size={11} className="text-emerald-400" />
+                          <span>All Caught Up</span>
+                        </span>
+                      )}
+                    </div>
+                    <h2 className="text-xl sm:text-2xl font-heading text-white uppercase tracking-wider flex items-center gap-2.5 mt-1.5">
+                      <Bell size={22} className="text-gold" /> System Notifications &amp; Alerts
+                    </h2>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Live real-time stream of incoming customer inquiries, VIP registrations, and automated WhatsApp communication events.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 self-start md:self-center shrink-0 flex-wrap">
+                    <ExportButton
+                      data={uniqueAlerts}
+                      columns={[
+                        { header: 'Alert Type', key: 'typeLabel' },
+                        { header: 'Title / Subject', key: 'title' },
+                        { header: 'Customer / Channel', key: 'badge' },
+                        { header: 'Details', key: 'details' },
+                        { header: 'Email', key: 'email', format: (a: any) => a.email || '-' },
+                        { header: 'Phone', key: 'phone', format: (a: any) => a.phone || '-' },
+                        { header: 'Source', key: 'source', format: (a: any) => a.source || '-' },
+                        { header: 'Status', key: 'isUnread', format: (a: any) => a.isUnread ? 'Unread' : 'Read' },
+                        { header: 'Timestamp', key: 'timestamp', format: (a: any) => a.timestamp ? new Date(a.timestamp).toLocaleString() : 'Recent' }
+                      ]}
+                      title="Natal Interior Design - System Notifications & Alerts Stream"
+                      subtitle="Executive log of incoming inquiries, VIP registrations, and WhatsApp communication events"
+                      category="Notifications & Alerts"
+                      filenamePrefix="natal_notifications_stream"
+                      summaryCards={[
+                        { label: 'Total Alerts', value: uniqueAlerts.length },
+                        { label: 'Unread', value: unreadNotificationsCount },
+                        { label: 'Leads', value: leadsCountInList },
+                        { label: 'WhatsApp', value: waCountInList }
+                      ]}
+                      buttonLabel="Export Alerts"
+                      variant="outline"
+                    />
+                    {unreadNotificationsCount > 0 && (
+                      <button 
+                        onClick={handleMarkAllNotificationsRead}
+                        className="px-3.5 py-2 bg-gold/15 hover:bg-gold/25 border border-gold/40 text-gold hover:text-white text-xs font-mono uppercase tracking-wider rounded-sm transition-all cursor-pointer flex items-center gap-1.5 shadow-sm font-semibold"
+                        title="Mark all active notifications as read"
+                      >
+                        <Check size={13} />
+                        <span>Mark All as Read ({unreadNotificationsCount})</span>
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => {
+                        setSuccessNotice('Notification stream refreshed with live database data');
+                        setTimeout(() => setSuccessNotice(''), 3000);
+                      }}
+                      className="px-3.5 py-2 bg-white/5 hover:bg-gold/10 border border-white/10 hover:border-gold/40 text-gray-300 hover:text-gold text-xs font-mono uppercase tracking-wider rounded-sm transition-all cursor-pointer flex items-center gap-1.5"
+                      title="Refresh real-time notification feeds"
+                    >
+                      <RefreshCw size={12} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Metric Summary Cards: 6 Columns on Laptop, 3 on Tablet, 2 on Mobile */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 w-full">
+                  <div 
+                    onClick={() => switchTab('users')}
+                    className="bg-black-pure border border-gold/20 p-3.5 sm:p-4 rounded-sm hover:border-gold transition-all cursor-pointer group shadow-md flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] sm:text-xs font-mono text-gray-400 uppercase tracking-wider">VIP Clients</span>
+                        <UserCheck size={16} className="text-gold group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="text-xl sm:text-2xl font-heading font-bold text-white group-hover:text-gold transition-colors">{users.length}</div>
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-2 flex items-center justify-between">
+                      <span>Profiles</span>
+                      <span className="text-gold underline font-mono">Directory &rarr;</span>
+                    </div>
+                  </div>
+
+                  <div 
+                    onClick={() => switchTab('leads')}
+                    className="bg-black-pure border border-gold/20 p-3.5 sm:p-4 rounded-sm hover:border-gold transition-all cursor-pointer group shadow-md flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] sm:text-xs font-mono text-gray-400 uppercase tracking-wider">Inquiries</span>
+                        <Mail size={16} className="text-emerald-400 group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="text-xl sm:text-2xl font-heading font-bold text-white group-hover:text-emerald-400 transition-colors">{leads.length}</div>
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-2 flex items-center justify-between">
+                      <span>Live CRM</span>
+                      <span className="text-emerald-400 underline font-mono">Quotes &rarr;</span>
+                    </div>
+                  </div>
+
+                  <div 
+                    onClick={() => switchTab('communications')}
+                    className="bg-black-pure border border-gold/20 p-3.5 sm:p-4 rounded-sm hover:border-gold transition-all cursor-pointer group shadow-md flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] sm:text-xs font-mono text-gray-400 uppercase tracking-wider">WhatsApp</span>
+                        <MessageSquare size={16} className="text-emerald-400 group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="text-xl sm:text-2xl font-heading font-bold text-white group-hover:text-emerald-400 transition-colors">{whatsappDispatches.length}</div>
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-2 flex items-center justify-between">
+                      <span>Dispatches</span>
+                      <span className="text-emerald-400 underline font-mono">Hub &rarr;</span>
+                    </div>
+                  </div>
+
+                  <div 
+                    onClick={() => switchTab('projects')}
+                    className="bg-black-pure border border-gold/20 p-3.5 sm:p-4 rounded-sm hover:border-gold transition-all cursor-pointer group shadow-md flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] sm:text-xs font-mono text-gray-400 uppercase tracking-wider">Portfolio</span>
+                        <Sparkles size={16} className="text-gold group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="text-xl sm:text-2xl font-heading font-bold text-white group-hover:text-gold transition-colors">{projects.length}</div>
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-2 flex items-center justify-between">
+                      <span>Creations</span>
+                      <span className="text-gold underline font-mono">Projects &rarr;</span>
+                    </div>
+                  </div>
+
+                  <div 
+                    onClick={() => switchTab('services')}
+                    className="bg-black-pure border border-gold/20 p-3.5 sm:p-4 rounded-sm hover:border-gold transition-all cursor-pointer group shadow-md flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] sm:text-xs font-mono text-gray-400 uppercase tracking-wider">Services</span>
+                        <Briefcase size={16} className="text-gold group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="text-xl sm:text-2xl font-heading font-bold text-white group-hover:text-gold transition-colors">{allCombinedServices.length}</div>
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-2 flex items-center justify-between">
+                      <span>Catalog</span>
+                      <span className="text-gold underline font-mono">Services &rarr;</span>
+                    </div>
+                  </div>
+
+                  <div 
+                    onClick={() => switchTab('transformations')}
+                    className="bg-black-pure border border-gold/20 p-3.5 sm:p-4 rounded-sm hover:border-gold transition-all cursor-pointer group shadow-md flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] sm:text-xs font-mono text-gray-400 uppercase tracking-wider">Before &amp; After</span>
+                        <SplitSquareHorizontal size={16} className="text-gold group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="text-xl sm:text-2xl font-heading font-bold text-white group-hover:text-gold transition-colors">{transformations.length}</div>
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-2 flex items-center justify-between">
+                      <span>Comparisons</span>
+                      <span className="text-gold underline font-mono">Sliders &rarr;</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 30-Day Client Engagement & Quote Metrics Visualization */}
+                <ClientEngagementMetricsChart
+                  leads={leads}
+                  users={users}
+                  userActivities={userActivities}
+                />
+
+                {/* Filter Tabs & Search Controls: Full Laptop Width Bar */}
+                <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-black-pure border border-gold/30 p-3.5 sm:p-4 rounded-sm shadow-xl">
+                  <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
+                    <button
+                      onClick={() => setNotificationFilter('all')}
+                      className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                        notificationFilter === 'all'
+                          ? 'bg-gold text-black-pure font-bold shadow-sm'
+                          : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5'
+                      }`}
+                    >
+                      <span>All Alerts</span>
+                      <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none bg-red-600 text-white shadow-sm shrink-0 border-0 outline-none ring-0">{uniqueAlerts.length}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setNotificationFilter('unread')}
+                      className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                        notificationFilter === 'unread'
+                          ? 'bg-gold text-black-pure font-bold shadow-sm'
+                          : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5'
+                      }`}
+                    >
+                      <span>Unread</span>
+                      {unreadCountInList > 0 && (
+                        <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none bg-red-600 text-white shadow-sm shrink-0 border-0 outline-none ring-0">
+                          {unreadCountInList}
+                        </span>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => setNotificationFilter('leads')}
+                      className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                        notificationFilter === 'leads'
+                          ? 'bg-gold text-black-pure font-bold shadow-sm'
+                          : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5'
+                      }`}
+                    >
+                      <Mail size={12} />
+                      <span>Inquiries</span>
+                      <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none bg-red-600 text-white shadow-sm shrink-0 border-0 outline-none ring-0">{leadsCountInList}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setNotificationFilter('users')}
+                      className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                        notificationFilter === 'users'
+                          ? 'bg-gold text-black-pure font-bold shadow-sm'
+                          : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5'
+                      }`}
+                    >
+                      <UserCheck size={12} />
+                      <span>VIP Clients</span>
+                      <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none bg-red-600 text-white shadow-sm shrink-0 border-0 outline-none ring-0">{usersCountInList}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setNotificationFilter('whatsapp')}
+                      className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                        notificationFilter === 'whatsapp'
+                          ? 'bg-gold text-black-pure font-bold shadow-sm'
+                          : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5'
+                      }`}
+                    >
+                      <MessageSquare size={12} />
+                      <span>WhatsApp Logs</span>
+                      <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none bg-red-600 text-white shadow-sm shrink-0 border-0 outline-none ring-0">{waCountInList}</span>
+                    </button>
+                  </div>
+
+                  {/* Search Bar */}
+                  <div className="relative w-full lg:w-80 shrink-0">
+                    <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gold/70" />
+                    <input 
+                      type="text" 
+                      value={notificationSearch}
+                      onChange={(e) => setNotificationSearch(e.target.value)}
+                      placeholder="Search alerts by name, email, service..."
+                      className="w-full pl-9 pr-8 py-2 bg-black-rich border border-gold/30 hover:border-gold/60 focus:border-gold rounded-sm text-xs text-white placeholder-gray-500 font-sans outline-none transition-colors"
+                    />
+                    {notificationSearch && (
+                      <button 
+                        onClick={() => setNotificationSearch('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs cursor-pointer"
+                        title="Clear search"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Main Notification Feed List */}
+                <div className="bg-[#0f0f0f] border border-white/10 p-4 sm:p-6 lg:p-7 rounded-sm shadow-sm space-y-3">
+                  <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                    <div className="flex items-center gap-2">
+                      <Sparkles size={16} className="text-gold" />
+                      <h3 className="text-sm font-heading uppercase tracking-widest text-gold font-bold">
+                        Activity Stream ({filteredList.length})
+                      </h3>
+                    </div>
+                    {unreadCountInList > 0 && (
+                      <span className="text-xs font-mono text-red-400 flex items-center gap-1.5 px-2.5 py-0.5 bg-red-600/15 border border-red-500/40 rounded-full">
                         <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-                        <span>{unreadNotificationsCount} New Unread Alert{unreadNotificationsCount !== 1 ? 's' : ''}</span>
-                      </span>
-                    ) : (
-                      <span className="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full text-[10px] font-mono font-bold">
-                        All Caught Up
+                        <span>{unreadCountInList} Unread Notification{unreadCountInList !== 1 ? 's' : ''}</span>
                       </span>
                     )}
                   </div>
-                  <h2 className="text-xl sm:text-2xl font-heading text-white uppercase tracking-wider flex items-center gap-2.5 mt-1">
-                    <Bell size={22} className="text-gold" /> System Notifications & Alerts
-                  </h2>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  {unreadNotificationsCount > 0 && (
-                    <button 
-                      onClick={handleMarkAllNotificationsRead}
-                      className="px-3 py-1.5 bg-red-950/70 hover:bg-red-900 border border-red-500/50 text-red-200 hover:text-white text-xs font-mono uppercase tracking-wider rounded transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
-                      title="Clear notification badges by marking all as read"
-                    >
-                      <Check size={13} />
-                      <span>Mark All as Read ({unreadNotificationsCount})</span>
-                    </button>
+
+                  {filteredList.length === 0 ? (
+                    <div className="py-12 text-center text-gray-400">
+                      <Bell size={32} className="mx-auto mb-3 text-gray-600 opacity-60" />
+                      <p className="text-sm font-sans font-medium text-gray-300">No notifications match your current filter or search criteria.</p>
+                      <button
+                        onClick={() => { setNotificationFilter('all'); setNotificationSearch(''); }}
+                        className="mt-3 px-3.5 py-1.5 text-xs font-mono uppercase tracking-wider text-gold hover:text-white border border-gold/30 hover:border-gold rounded-sm transition-all cursor-pointer"
+                      >
+                        Reset Filters
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {filteredList.map((item) => {
+                        const isUnread = item.isUnread;
+                        return (
+                          <div 
+                            key={item.id}
+                            className={`p-4 sm:p-5 rounded-sm border transition-all duration-200 flex flex-col justify-between ${
+                              isUnread 
+                                ? 'border-gold/40 bg-[#141414] shadow-sm hover:border-gold/60' 
+                                : 'border-white/10 bg-[#0f0f0f] hover:border-white/20 hover:bg-[#141414]'
+                            }`}
+                          >
+                            <div className="flex flex-col justify-between gap-4 h-full">
+                              {/* Left & Middle Column: Icon, Title, Badges, Details, Contacts */}
+                              <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                                {/* Category Icon Badge (neat, refined colors) */}
+                                <div className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center border mt-0.5 bg-white/5 border-white/10 text-gold">
+                                  {item.category === 'lead' && <Mail size={15} />}
+                                  {item.category === 'user' && <UserCheck size={15} />}
+                                  {item.category === 'whatsapp' && <MessageSquare size={15} />}
+                                  {item.category === 'system' && <Sparkles size={15} />}
+                                </div>
+
+                                <div className="min-w-0 flex-1 space-y-1">
+                                  {/* Title & Badges */}
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {isUnread && (
+                                      <span className="w-1.5 h-1.5 rounded-full bg-gold shrink-0" title="Unread alert" />
+                                    )}
+                                    <h4 className="text-sm font-semibold text-white tracking-wide truncate">
+                                      {item.title}
+                                    </h4>
+                                    {item.category === 'user' && (
+                                      <span className="text-[9px] font-mono px-2 py-0.5 bg-white/5 text-gold border border-gold/30 font-bold rounded tracking-wider shadow-sm flex items-center gap-1">
+                                        <Sparkles size={9} /> NEW USER
+                                      </span>
+                                    )}
+                                    {isUnread && item.category !== 'user' && (
+                                      <span className="text-[9px] font-mono px-2 py-0.5 bg-white/5 text-red-400 border border-red-500/30 font-bold rounded tracking-wider shadow-sm">
+                                        NEW
+                                      </span>
+                                    )}
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded border bg-white/5 text-gray-300 border-white/10">
+                                      {item.typeLabel}
+                                    </span>
+                                    {item.service && (
+                                      <span className="text-[10px] font-mono px-2 py-0.5 bg-white/5 text-gray-300 border border-white/10 rounded truncate max-w-[200px] sm:max-w-[280px]">
+                                        {item.service}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Details / Message */}
+                                  {item.details && (
+                                    <p className="text-xs text-gray-300 font-sans leading-relaxed line-clamp-2">
+                                      {item.details}
+                                    </p>
+                                  )}
+
+                                  {/* Metadata: Email, Phone, Source, Timestamp */}
+                                  <div className="flex items-center gap-3 text-[11px] text-gray-400 flex-wrap pt-0.5">
+                                    {item.email && (
+                                      <span className="flex items-center gap-1 font-mono text-gray-300">
+                                        <Mail size={11} className="text-gray-500" />
+                                        <span>{item.email}</span>
+                                      </span>
+                                    )}
+                                    {item.phone && (
+                                      <span className="flex items-center gap-1 font-mono text-gray-300">
+                                        <Phone size={11} className="text-gray-500" />
+                                        <span>{item.phone}</span>
+                                      </span>
+                                    )}
+                                    {item.source && (
+                                      <span className="text-gray-400">
+                                        Source: <strong className="text-gray-300 font-mono font-normal">{item.source}</strong>
+                                      </span>
+                                    )}
+                                    <span className="text-gray-500 font-mono text-[10px]">
+                                      {new Date(item.timestamp).toLocaleString(undefined, {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                      })}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Bottom Actions Bar (View in Tab, WhatsApp, Mark Read/Unread) */}
+                              <div className="flex items-center gap-2 shrink-0 flex-wrap pt-3 border-t border-white/5 w-full justify-end">
+                                {/* Send to Owner WhatsApp */}
+                                <a
+                                  href={getOwnerWhatsAppUrl({
+                                    id: item.id,
+                                    leadType: item.typeLabel || 'Database Notification',
+                                    name: item.title,
+                                    phone: item.phone,
+                                    email: item.email,
+                                    service: item.service,
+                                    details: item.details,
+                                    timestamp: item.timestamp
+                                  })}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider bg-gold hover:bg-gold-light text-black font-bold rounded-sm transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                                  title={`Send this alert to Studio Owner WhatsApp (${whatsappConfig.ownerWhatsAppNumber})`}
+                                >
+                                  <MessageSquare size={12} />
+                                  <span>Owner WhatsApp</span>
+                                </a>
+
+                                {/* Reply to Client via WhatsApp if phone exists */}
+                                {item.phone && (
+                                  <a
+                                    href={getClientWhatsAppReplyUrl(item.phone, item.title, item.service)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider bg-black-pure hover:bg-white/10 border border-white/20 text-gray-200 hover:text-white rounded-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                                    title="Reply directly to client on WhatsApp"
+                                  >
+                                    <span>Reply</span>
+                                  </a>
+                                )}
+
+                                {/* Jump to Target Dashboard Tab */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleMarkSingleNotificationRead(item.id);
+                                    switchTab(item.targetTab);
+                                  }}
+                                  className="px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-gold/10 hover:bg-gold/25 border border-gold/30 text-gold hover:text-white rounded-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                                  title={`Open item in ${item.targetTab} tab`}
+                                >
+                                  <span>Open in {item.targetTab === 'leads' ? 'CRM' : item.targetTab === 'users' ? 'Users' : item.targetTab === 'communications' ? 'Comms' : 'Details'} &rarr;</span>
+                                </button>
+
+                                {/* Toggle Read / Unread Status */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleNotificationRead(item.id)}
+                                  className="px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 rounded-sm transition-all cursor-pointer"
+                                  title={isUnread ? 'Mark this notification as read' : 'Mark as unread'}
+                                >
+                                  {isUnread ? 'Mark Read' : 'Mark Unread'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
-                  <button 
-                    onClick={() => {
-                      setSuccessNotice('Notification stream refreshed with live database data');
-                      setTimeout(() => setSuccessNotice(''), 3000);
-                    }}
-                    className="px-3 py-1.5 bg-white/5 hover:bg-gold/10 border border-white/10 hover:border-gold/40 text-gray-300 hover:text-gold text-xs font-mono uppercase tracking-wider rounded transition-all cursor-pointer flex items-center gap-1.5"
-                  >
-                    <RefreshCw size={12} />
-                    <span>Refresh</span>
-                  </button>
                 </div>
               </div>
-
-              {/* Notification Summary Cards with Instant Tab Links */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div 
-                  onClick={() => switchTab('users')}
-                  className="bg-black-pure border border-gold/20 p-4 rounded-sm hover:border-gold transition-all cursor-pointer group"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-mono text-gray-400 uppercase tracking-wider">VIP & Users</span>
-                    <UserCheck size={16} className="text-gold group-hover:scale-110 transition-transform" />
-                  </div>
-                  <div className="text-2xl font-heading font-bold text-white group-hover:text-gold transition-colors">{users.length}</div>
-                  <div className="text-[11px] text-gray-400 mt-1 flex items-center justify-between">
-                    <span>Registered profiles</span>
-                    <span className="text-gold text-[10px] underline">Open Directory &rarr;</span>
-                  </div>
-                </div>
-
-                <div 
-                  onClick={() => switchTab('leads')}
-                  className="bg-black-pure border border-gold/20 p-4 rounded-sm hover:border-gold transition-all cursor-pointer group"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-mono text-gray-400 uppercase tracking-wider">Direct Inquiries</span>
-                    <Mail size={16} className="text-emerald-400 group-hover:scale-110 transition-transform" />
-                  </div>
-                  <div className="text-2xl font-heading font-bold text-white group-hover:text-emerald-400 transition-colors">{leads.length}</div>
-                  <div className="text-[11px] text-gray-400 mt-1 flex items-center justify-between">
-                    <span>Active client leads</span>
-                    <span className="text-emerald-400 text-[10px] underline">Open CRM &rarr;</span>
-                  </div>
-                </div>
-
-                <div 
-                  onClick={() => switchTab('profile')}
-                  className="bg-black-pure border border-gold/20 p-4 rounded-sm hover:border-gold transition-all cursor-pointer group"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-mono text-gray-400 uppercase tracking-wider">Security State</span>
-                    <ShieldCheck size={16} className="text-gold group-hover:scale-110 transition-transform" />
-                  </div>
-                  <div className="text-base font-heading font-bold text-emerald-400 group-hover:text-gold transition-colors">Authenticated</div>
-                  <div className="text-[11px] text-gray-400 mt-1 flex items-center justify-between">
-                    <span>Master Admin Online</span>
-                    <span className="text-gold text-[10px] underline">Admin Profile &rarr;</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Recent Activity Feed */}
-              <div className="bg-black-pure border border-gold/20 p-3.5 sm:p-6 rounded-sm shadow-lg">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-heading uppercase tracking-widest text-gold flex items-center gap-2">
-                    <Sparkles size={16} /> Latest System Alerts & Submissions
-                  </h3>
-                  {unreadNotificationsCount > 0 && (
-                    <span className="text-[11px] font-mono text-red-400 font-bold">
-                      {unreadNotificationsCount} Unread Alert{unreadNotificationsCount !== 1 ? 's' : ''}
-                    </span>
-                  )}
-                </div>
-                <div className="divide-y divide-white/5 space-y-1">
-                  {users.slice(0, 6).map((userItem, idx) => {
-                    const uId = userItem.id || `user_${userItem.email || idx}`;
-                    const isUnread = !readNotificationIds.includes(uId) && !userItem.isAdmin && !userItem.email?.toLowerCase().includes('admin');
-                    return (
-                      <div key={userItem.id || idx} className={`py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/5 px-2 rounded transition-colors ${isUnread ? 'bg-red-950/15 border-l-2 border-red-500 pl-3' : ''}`}>
-                        <div className="flex items-start gap-3">
-                          <div className={`w-8 h-8 rounded-full ${isUnread ? 'bg-red-500/20 border-red-500/60' : 'bg-gold/15 border-gold/40'} border flex items-center justify-center shrink-0 mt-0.5`}>
-                            <UserCheck size={15} className={isUnread ? 'text-red-400' : 'text-gold'} />
-                          </div>
-                          <div>
-                            <div className="text-sm font-semibold text-white flex items-center gap-2">
-                              <span>{userItem.name}</span>
-                              {isUnread && (
-                                <span className="text-[9px] font-mono px-1.5 py-0.5 bg-red-600 text-white font-extrabold rounded shadow-sm animate-pulse">
-                                  NEW
-                                </span>
-                              )}
-                              <span className="text-[10px] font-mono px-2 py-0.5 bg-gold/10 text-gold border border-gold/30 rounded">
-                                {userItem.role || 'VIP Client'}
-                              </span>
-                            </div>
-                            <div className="text-xs text-gray-400 mt-0.5">
-                              {userItem.email} &bull; Source: <span className="text-gray-300 font-mono">{userItem.source || 'Quotation Form'}</span>
-                              {userItem.service && ` &bull; Project: ${userItem.service}`}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 sm:self-center">
-                          {isUnread && (
-                            <button
-                              type="button"
-                              onClick={() => handleMarkSingleNotificationRead(uId)}
-                              className="px-2 py-1 text-[10px] font-mono uppercase bg-white/5 hover:bg-white/15 text-gray-300 border border-white/10 rounded transition-colors cursor-pointer"
-                              title="Mark this notification as read"
-                            >
-                              Mark Read
-                            </button>
-                          )}
-                          <button 
-                            onClick={() => {
-                              handleMarkSingleNotificationRead(uId);
-                              switchTab('users');
-                            }}
-                            className="px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider bg-gold/10 hover:bg-gold/25 border border-gold/30 text-gold rounded transition-colors cursor-pointer"
-                          >
-                            View in Users
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {leads.slice(0, 6).map((leadItem, idx) => {
-                    const lId = leadItem.id || `lead_${leadItem.email || leadItem.phone || idx}`;
-                    const isUnread = !readNotificationIds.includes(lId);
-                    return (
-                      <div key={leadItem.id || idx} className={`py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/5 px-2 rounded transition-colors ${isUnread ? 'bg-red-950/15 border-l-2 border-red-500 pl-3' : ''}`}>
-                        <div className="flex items-start gap-3">
-                          <div className={`w-8 h-8 rounded-full ${isUnread ? 'bg-red-500/20 border-red-500/60' : 'bg-emerald-500/15 border-emerald-500/40'} border flex items-center justify-center shrink-0 mt-0.5`}>
-                            <Mail size={15} className={isUnread ? 'text-red-400' : 'text-emerald-400'} />
-                          </div>
-                          <div>
-                            <div className="text-sm font-semibold text-white flex items-center gap-2">
-                              <span>{leadItem.name || 'Direct Lead'}</span>
-                              {isUnread && (
-                                <span className="text-[9px] font-mono px-1.5 py-0.5 bg-red-600 text-white font-extrabold rounded shadow-sm animate-pulse">
-                                  NEW
-                                </span>
-                              )}
-                              <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded">
-                                {leadItem.service || 'Direct Message'}
-                              </span>
-                            </div>
-                            <div className="text-xs text-gray-400 mt-0.5">
-                              {leadItem.email || leadItem.phone} &bull; <span className="italic">{leadItem.message ? `"${leadItem.message.slice(0, 50)}..."` : (leadItem.details ? `"${leadItem.details.slice(0, 50)}..."` : 'New consultation request')}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 sm:self-center">
-                          {isUnread && (
-                            <button
-                              type="button"
-                              onClick={() => handleMarkSingleNotificationRead(lId)}
-                              className="px-2 py-1 text-[10px] font-mono uppercase bg-white/5 hover:bg-white/15 text-gray-300 border border-white/10 rounded transition-colors cursor-pointer"
-                              title="Mark this notification as read"
-                            >
-                              Mark Read
-                            </button>
-                          )}
-                          <button 
-                            onClick={() => {
-                              handleMarkSingleNotificationRead(lId);
-                              switchTab('leads');
-                            }}
-                            className="px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider bg-emerald-500/10 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 rounded transition-colors cursor-pointer"
-                          >
-                            View in CRM
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {defaultSystemAlerts.map((sysAlert) => {
-                    const isUnread = !readNotificationIds.includes(sysAlert.id);
-                    return (
-                      <div key={sysAlert.id} className={`py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/5 px-2 rounded transition-colors ${isUnread ? 'bg-red-950/15 border-l-2 border-red-500 pl-3' : ''}`}>
-                        <div className="flex items-start gap-3">
-                          <div className={`w-8 h-8 rounded-full ${isUnread ? 'bg-red-500/20 border-red-500/60' : 'bg-gold/15 border-gold/40'} border flex items-center justify-center shrink-0 mt-0.5`}>
-                            <Sparkles size={15} className={isUnread ? 'text-red-400' : 'text-gold'} />
-                          </div>
-                          <div>
-                            <div className="text-sm font-semibold text-white flex items-center gap-2">
-                              <span>{sysAlert.title}</span>
-                              {isUnread && (
-                                <span className="text-[9px] font-mono px-1.5 py-0.5 bg-red-600 text-white font-extrabold rounded shadow-sm animate-pulse">
-                                  NEW
-                                </span>
-                              )}
-                              <span className="text-[10px] font-mono px-2 py-0.5 bg-gold/10 text-gold border border-gold/30 rounded">
-                                {sysAlert.name}
-                              </span>
-                            </div>
-                            <div className="text-xs text-gray-400 mt-0.5">
-                              {sysAlert.details || sysAlert.service} &bull; Source: <span className="text-gray-300 font-mono">{sysAlert.source}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 sm:self-center">
-                          {isUnread && (
-                            <button
-                              type="button"
-                              onClick={() => handleMarkSingleNotificationRead(sysAlert.id)}
-                              className="px-2 py-1 text-[10px] font-mono uppercase bg-white/5 hover:bg-white/15 text-gray-300 border border-white/10 rounded transition-colors cursor-pointer"
-                              title="Mark this notification as read"
-                            >
-                              Mark Read
-                            </button>
-                          )}
-                          <button 
-                            onClick={() => {
-                              handleMarkSingleNotificationRead(sysAlert.id);
-                              if (sysAlert.type === 'lead') switchTab('leads');
-                              else if (sysAlert.type === 'user') switchTab('users');
-                              else switchTab('profile');
-                            }}
-                            className="px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider bg-gold/10 hover:bg-gold/25 border border-gold/30 text-gold rounded transition-colors cursor-pointer"
-                          >
-                            Details
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {activeTab === 'settings' && (
             <div className="space-y-6 max-w-xl">
@@ -5326,28 +6049,68 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                 </form>
               </div>
 
-              {/* Connected Email Service Hub */}
-              <div className="bg-black-pure border border-gold/30 p-3.5 sm:p-6 space-y-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-white/10">
-                  <div>
-                    <span className="text-[10px] font-mono text-gold uppercase tracking-widest block mb-0.5">Live Integration</span>
-                    <h3 className="text-base font-heading text-white uppercase tracking-wider flex items-center gap-2">
-                      <Mail size={16} className="text-gold" /> Connected Email Service
-                    </h3>
+              {/* Quick Jump to Email & WhatsApp Settings */}
+              <div className="bg-black-pure border border-gold/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                    <Mail size={14} className="text-gold" /> Email &amp; WhatsApp Communications
                   </div>
-                  <div className="flex items-center gap-2 text-xs font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-500/50 px-3 py-1 rounded-sm w-fit">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                    <span className="font-bold uppercase tracking-wider">Service Connected &amp; Active</span>
+                  <div className="text-gray-400 text-[11px] mt-0.5">
+                    Configure your Recipient Email Address, Owner WhatsApp number, and automatic client activity alerts.
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => switchTab('communications')}
+                  className="px-4 py-2 bg-gold hover:bg-gold-light text-black-pure font-bold text-xs uppercase tracking-wider rounded-sm cursor-pointer shrink-0 transition-all shadow-sm"
+                >
+                  Open Settings
+                </button>
+              </div>
+            </div>
+          )}
 
-                <p className="text-xs text-gray-300 leading-relaxed">
-                  This website is connected to the real-time email dispatch service. All incoming client submissions across the <strong>Contact Us Form</strong>, <strong>Quotation Request Form</strong>, and <strong>VIP Client Registrations</strong> are automatically compiled and delivered directly to your email inbox with direct WhatsApp response links.
-                </p>
+          {activeTab === 'communications' && (
+            <div className="space-y-6 sm:space-y-8 w-full">
+              {/* Header with Live Status Indicators */}
+              <div className="border-b border-gold/20 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-[10px] font-mono text-gold uppercase tracking-widest block">Communications Hub</span>
+                  <h2 className="text-xl sm:text-2xl font-heading text-white uppercase tracking-wider flex items-center gap-2 mt-0.5 font-bold">
+                    <Mail size={22} className="text-gold" /> Email &amp; WhatsApp Settings
+                  </h2>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-500/50 px-3 py-1.5 rounded-sm shadow-sm">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="font-bold uppercase tracking-wider">Email Gateway: Active</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-500/50 px-3 py-1.5 rounded-sm shadow-sm">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="font-bold uppercase tracking-wider">WhatsApp Auto-Dispatch: Ready</span>
+                  </div>
+                </div>
+              </div>
 
-                {/* Email Service Configuration Form */}
-                <form onSubmit={handleSaveEmailConfig} className="space-y-4 bg-black-rich border border-gold/20 p-4 rounded-sm">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Two-Column Grid: Email Settings on Left, WhatsApp Settings on Right - Broad & Wide */}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 sm:gap-8 items-start w-full">
+                
+                {/* 1. Recipient Email Address Settings */}
+                <div className="bg-black-pure border border-gold/30 hover:border-gold p-5 sm:p-7 lg:p-8 space-y-5 shadow-xl transition-all w-full">
+                  <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                    <h3 className="text-sm font-heading text-white uppercase tracking-wider flex items-center gap-2 font-bold">
+                      <Mail size={16} className="text-gold" /> Recipient Email Address
+                    </h3>
+                    <span className="text-[10px] font-mono text-gold bg-gold/10 px-2 py-0.5 border border-gold/20 rounded">
+                      Inbound Leads
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    Set the email address where all website leads, quotations, and client inquiries are delivered directly.
+                  </p>
+
+                  <form onSubmit={handleSaveEmailConfig} className="space-y-4 bg-black-rich border border-gold/20 p-4 rounded-sm">
                     <div>
                       <label className="block text-[11px] font-mono uppercase tracking-wider text-gray-300 font-semibold mb-1.5 flex items-center gap-1.5">
                         <Mail size={13} className="text-gold" />
@@ -5359,10 +6122,10 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                         value={emailConfig.recipientEmail}
                         onChange={(e) => setEmailConfig({ ...emailConfig, recipientEmail: e.target.value })}
                         placeholder="mukisavicent7777@gmail.com"
-                        className="w-full bg-black-pure border border-white/20 focus:border-gold px-3.5 py-2 text-white text-xs font-mono focus:outline-none transition-colors"
+                        className="w-full bg-black-pure border border-white/20 focus:border-gold px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none transition-colors"
                       />
                       <span className="text-[10px] text-gray-400 font-mono mt-1 block">
-                        All website inquiries and quotation briefs will be delivered here.
+                        Website leads &amp; quotations will be dispatched to this inbox.
                       </span>
                     </div>
 
@@ -5378,106 +6141,549 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                         <option value="formsubmit">Direct Inbox Gateway (FormSubmit AJAX - No Server Needed)</option>
                         <option value="firestore_mail">Firestore Mail Collection (Firebase Extension)</option>
                       </select>
-                      <span className="text-[10px] text-gray-400 font-mono mt-1 block">
-                        Dual dispatch: delivers to inbox and logs in Firestore audit queue.
-                      </span>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-white/10">
+                      <button
+                        type="submit"
+                        className="bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold px-5 py-2 uppercase text-xs tracking-wider transition-all cursor-pointer rounded-sm shadow-md"
+                      >
+                        Save Email Preferences
+                      </button>
+                      {emailConfigSaved && (
+                        <span className="text-xs font-mono text-emerald-400 flex items-center gap-1.5">
+                          <CheckCircle size={14} /> {emailConfigSaved}
+                        </span>
+                      )}
+                    </div>
+                  </form>
+
+                  {/* Real-time Status Card */}
+                  <div className="p-3 bg-black-rich border border-white/10 space-y-1.5 text-xs font-mono">
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400">Current Destination:</span>
+                      <span className="text-white font-semibold">{emailConfig.recipientEmail}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400">Watched Collections:</span>
+                      <span className="text-gold font-semibold">mail &bull; leads</span>
                     </div>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-white/10">
-                    <button
-                      type="submit"
-                      className="bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold px-5 py-2 uppercase text-xs tracking-wider transition-all cursor-pointer rounded-sm shadow-md"
-                    >
-                      Save Email Preferences
-                    </button>
-                    {emailConfigSaved && (
-                      <span className="text-xs font-mono text-emerald-400 flex items-center gap-1.5">
-                        <CheckCircle size={14} /> {emailConfigSaved}
-                      </span>
-                    )}
-                  </div>
-                </form>
+                  {mailNotice && (
+                    <div className="p-3 bg-emerald-950/80 border border-emerald-500/60 text-emerald-200 text-xs flex items-center gap-2">
+                      <CheckCircle size={15} className="text-emerald-400 shrink-0" />
+                      <span>{mailNotice}</span>
+                    </div>
+                  )}
 
-                {/* Real-time Status Card */}
-                <div className="p-3 bg-black-rich border border-white/10 space-y-2 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-400">Current Destination:</span>
-                    <span className="text-white font-mono font-semibold">{emailConfig.recipientEmail}</span>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleSendTestMail}
+                      disabled={isSendingTestMail}
+                      className="w-full bg-gold hover:bg-gold-light text-black-pure font-bold px-4 py-2.5 uppercase text-xs tracking-wider transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 rounded-sm shadow-md"
+                    >
+                      {isSendingTestMail ? (
+                        <>
+                          <GoldSpinner size="xs" />
+                          <span>Dispatching Test Email...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Mail size={14} />
+                          <span>Send Test Email to {emailConfig.recipientEmail}</span>
+                        </>
+                      )}
+                    </button>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-400">Watched Collections:</span>
-                    <span className="text-gold font-mono font-semibold">mail &bull; leads</span>
+
+                  {/* Quick Activation Guide */}
+                  <div className="bg-black-rich border border-gold/20 p-3.5 space-y-2 text-[11px] text-gray-300">
+                    <span className="font-semibold text-gold uppercase tracking-wider block text-xs">
+                      1-Time Activation Notice:
+                    </span>
+                    <p>
+                      The first time an email address receives submissions, FormSubmit sends an activation email titled <em>"Action Required: Activate FormSubmit"</em>. <strong>Click "Activate Form" once</strong> in that email.
+                    </p>
+                    <p className="text-gray-400">
+                      Always check your <strong>Spam / Junk</strong> folder or <strong>Promotions</strong> tab if not in Primary inbox.
+                    </p>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-400">Instant Delivery:</span>
-                    <span className="text-emerald-400 font-mono flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                      Active &amp; Listening for Submissions
+                </div>
+
+                {/* 2. Website Owner WhatsApp Dispatch Hub */}
+                <div className="bg-black-pure border border-gold/30 hover:border-gold p-5 sm:p-7 lg:p-8 space-y-5 shadow-xl transition-all w-full">
+                  <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                    <h3 className="text-sm font-heading text-white uppercase tracking-wider flex items-center gap-2 font-bold">
+                      <MessageSquare size={16} className="text-gold" /> Owner WhatsApp Dispatch Hub
+                    </h3>
+                    <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 border border-emerald-500/30 rounded">
+                      Live Dispatcher
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    Automatically deliver professional executive WhatsApp notifications directly to the website owner whenever any activity occurs on the site.
+                  </p>
+
+                  <form onSubmit={handleSaveWhatsAppConfig} className="space-y-4 bg-black-rich border border-gold/20 p-4 rounded-sm">
+                    <div>
+                      <label className="block text-[11px] font-mono uppercase tracking-wider text-gray-300 font-semibold mb-1.5 flex items-center gap-1.5">
+                        <Phone size={13} className="text-gold" />
+                        <span>Website Owner WhatsApp Number *</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={whatsappConfig.ownerWhatsAppNumber}
+                        onChange={(e) => setWhatsappConfig({ ...whatsappConfig, ownerWhatsAppNumber: e.target.value })}
+                        placeholder="0745 694 499 or +256 745 694 499"
+                        className="w-full bg-black-pure border border-white/20 focus:border-gold px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none transition-colors"
+                      />
+                      <span className="text-[10px] text-gray-400 font-mono mt-1 block">
+                        WhatsApp alerts will be formatted and routed to this phone number.
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-black-pure border border-white/10 space-y-2">
+                      <label className="flex items-center gap-2.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={whatsappConfig.autoDispatchOnActivity}
+                          onChange={(e) => setWhatsappConfig({ ...whatsappConfig, autoDispatchOnActivity: e.target.checked })}
+                          className="w-4 h-4 accent-gold rounded"
+                        />
+                        <span className="text-xs font-semibold text-white">
+                          Automatically Queue WhatsApp Alerts for All Website Activities
+                        </span>
+                      </label>
+                      <p className="text-[10px] text-gray-400 pl-6.5">
+                        Includes Quotations, Contact Forms, VIP Registrations, and WhatsApp Chat inquiries.
+                      </p>
+                      <label className="flex items-center gap-2.5 cursor-pointer pt-2 border-t border-white/5">
+                        <input
+                          type="checkbox"
+                          checked={!!whatsappConfig.autoOpenWhatsAppInAdminOnNewLead}
+                          onChange={(e) => setWhatsappConfig({ ...whatsappConfig, autoOpenWhatsAppInAdminOnNewLead: e.target.checked })}
+                          className="w-4 h-4 accent-emerald-500 rounded"
+                        />
+                        <span className="text-xs font-semibold text-emerald-400">
+                          Auto-launch WhatsApp tab in Admin Console when a new lead arrives
+                        </span>
+                      </label>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-mono uppercase tracking-wider text-gray-300 font-semibold mb-1.5">
+                        WhatsApp Dispatch Gateway
+                      </label>
+                      <select
+                        value={whatsappConfig.gatewayProvider}
+                        onChange={(e) => setWhatsappConfig({ ...whatsappConfig, gatewayProvider: e.target.value as any })}
+                        className="w-full bg-black-pure border border-white/20 focus:border-gold px-3.5 py-2 text-white text-xs focus:outline-none transition-colors"
+                      >
+                        <option value="direct">Direct WhatsApp Executive Link (100% Free, Instant 1-Click Send, No API Key needed)</option>
+                        <option value="callmebot">Automated CallMeBot Gateway (Direct Automated Delivery to Phone, Free)</option>
+                        <option value="ultramsg">UltraMsg WhatsApp Cloud API (Automated 24/7 Delivery to Phone)</option>
+                        <option value="greenapi">Green-API WhatsApp Gateway (Automated 24/7 Delivery to Phone)</option>
+                        <option value="webhook">Custom Webhook / Zapier / WhatsApp Business API</option>
+                      </select>
+                    </div>
+
+                    {whatsappConfig.gatewayProvider === 'callmebot' && (
+                      <div className="p-3 bg-black-pure border border-gold/20 space-y-2.5">
+                        <div className="flex items-center justify-between flex-wrap gap-1">
+                          <label className="block text-[10px] font-mono uppercase tracking-wider text-gold font-semibold">
+                            CallMeBot Free API Key (Required for Background Phone Delivery)
+                          </label>
+                          <button
+                            type="button"
+                            onClick={handleTestGatewayLive}
+                            disabled={!whatsappConfig.callMeBotApiKey}
+                            className="text-[10px] font-mono font-bold text-gold hover:text-white bg-gold/15 hover:bg-gold/30 px-2.5 py-0.5 border border-gold/40 rounded transition-all cursor-pointer"
+                          >
+                            Verify Key Live
+                          </button>
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={whatsappConfig.callMeBotApiKey || ''}
+                            onChange={(e) => setWhatsappConfig({ ...whatsappConfig, callMeBotApiKey: e.target.value })}
+                            placeholder="e.g. 123456"
+                            className="flex-1 bg-black-rich border border-white/20 focus:border-gold px-3 py-1.5 text-white text-xs font-mono focus:outline-none"
+                          />
+                        </div>
+
+                        {gatewayTestResult && (
+                          <div className={`p-2.5 rounded-sm text-[11px] font-mono border ${
+                            gatewayTestResult.status === 'success'
+                              ? 'bg-[#141414] border-emerald-500/40 text-emerald-300'
+                              : gatewayTestResult.status === 'testing'
+                              ? 'bg-[#141414] border-white/20 text-gray-300'
+                              : 'bg-[#141414] border-amber-500/40 text-amber-300'
+                          }`}>
+                            <div className="flex items-start gap-2">
+                              {gatewayTestResult.status === 'success' ? (
+                                <CheckCircle size={14} className="text-emerald-400 shrink-0 mt-0.5" />
+                              ) : gatewayTestResult.status === 'testing' ? (
+                                <Clock size={14} className="text-gray-400 shrink-0 mt-0.5" />
+                              ) : (
+                                <AlertCircle size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                              )}
+                              <div className="flex-1 leading-snug">{gatewayTestResult.message}</div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 pt-1 flex-wrap gap-2">
+                          <span>Must be generated from your WhatsApp (+256 {whatsappConfig.ownerWhatsAppNumber}):</span>
+                          <a
+                            href="https://wa.me/34644919680?text=I%20allow%20callmebot%20to%20send%20me%20messages"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-400 hover:text-emerald-300 underline font-semibold flex items-center gap-1"
+                          >
+                            <span>Message CallMeBot (+34 644 91 96 80)</span>
+                          </a>
+                        </div>
+                      </div>
+                    )}
+
+                    {whatsappConfig.gatewayProvider === 'ultramsg' && (
+                      <div className="p-3 bg-black-pure border border-white/10 space-y-2">
+                        <label className="block text-[10px] font-mono uppercase tracking-wider text-gold font-semibold">
+                          UltraMsg Instance ID &amp; Token
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={whatsappConfig.ultraMsgInstanceId || ''}
+                            onChange={(e) => setWhatsappConfig({ ...whatsappConfig, ultraMsgInstanceId: e.target.value })}
+                            placeholder="Instance ID (e.g. instance12345)"
+                            className="w-full bg-black-rich border border-white/20 focus:border-gold px-3 py-1.5 text-white text-xs font-mono focus:outline-none"
+                          />
+                          <input
+                            type="text"
+                            value={whatsappConfig.ultraMsgToken || ''}
+                            onChange={(e) => setWhatsappConfig({ ...whatsappConfig, ultraMsgToken: e.target.value })}
+                            placeholder="Token (e.g. xyz12345abc)"
+                            className="w-full bg-black-rich border border-white/20 focus:border-gold px-3 py-1.5 text-white text-xs font-mono focus:outline-none"
+                          />
+                        </div>
+                        <span className="text-[10px] text-gray-400 block">
+                          Connects directly to your UltraMsg.com WhatsApp instance.
+                        </span>
+                      </div>
+                    )}
+
+                    {whatsappConfig.gatewayProvider === 'greenapi' && (
+                      <div className="p-3 bg-black-pure border border-white/10 space-y-2">
+                        <label className="block text-[10px] font-mono uppercase tracking-wider text-gold font-semibold">
+                          Green-API Instance &amp; Token
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={whatsappConfig.greenApiInstanceId || ''}
+                            onChange={(e) => setWhatsappConfig({ ...whatsappConfig, greenApiInstanceId: e.target.value })}
+                            placeholder="IdInstance (e.g. 1101234567)"
+                            className="w-full bg-black-rich border border-white/20 focus:border-gold px-3 py-1.5 text-white text-xs font-mono focus:outline-none"
+                          />
+                          <input
+                            type="text"
+                            value={whatsappConfig.greenApiToken || ''}
+                            onChange={(e) => setWhatsappConfig({ ...whatsappConfig, greenApiToken: e.target.value })}
+                            placeholder="ApiTokenInstance"
+                            className="w-full bg-black-rich border border-white/20 focus:border-gold px-3 py-1.5 text-white text-xs font-mono focus:outline-none"
+                          />
+                        </div>
+                        <span className="text-[10px] text-gray-400 block">
+                          Delivers through Green-API.com cloud instance.
+                        </span>
+                      </div>
+                    )}
+
+                    {whatsappConfig.gatewayProvider === 'webhook' && (
+                      <div className="p-3 bg-black-pure border border-white/10 space-y-2">
+                        <label className="block text-[10px] font-mono uppercase tracking-wider text-gold font-semibold">
+                          Webhook Endpoint URL
+                        </label>
+                        <input
+                          type="url"
+                          value={whatsappConfig.webhookUrl || ''}
+                          onChange={(e) => setWhatsappConfig({ ...whatsappConfig, webhookUrl: e.target.value })}
+                          placeholder="https://your-api.com/whatsapp-webhook"
+                          className="w-full bg-black-rich border border-white/20 focus:border-gold px-3 py-1.5 text-white text-xs font-mono focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-white/10">
+                      <button
+                        type="submit"
+                        className="bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold px-5 py-2 uppercase text-xs tracking-wider transition-all cursor-pointer rounded-sm shadow-md"
+                      >
+                        Save WhatsApp Preferences
+                      </button>
+                      {whatsappConfigSaved && (
+                        <span className="text-xs font-mono text-emerald-400 flex items-center gap-1.5">
+                          <CheckCircle size={14} /> {whatsappConfigSaved}
+                        </span>
+                      )}
+                    </div>
+                  </form>
+
+                  {/* Real-time Status Card */}
+                  <div className="p-3 bg-black-rich border border-white/10 space-y-2 text-xs font-mono">
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400">Configured Owner Number:</span>
+                      <span className="text-white font-semibold">{whatsappConfig.ownerWhatsAppNumber}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400">Database Central Source of Truth:</span>
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                        Server onCreate Triggers Active
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-gray-400 pt-1 border-t border-white/5 flex items-center justify-between flex-wrap gap-1">
+                      <span>Monitored Collections:</span>
+                      <span className="text-gold">leads • user_activities • users • notifications</span>
+                    </div>
+                  </div>
+
+                  {whatsappNotice && (
+                    <div className={`p-3 text-xs flex items-start gap-2.5 rounded-sm border ${
+                      whatsappNotice.includes('APIKey is invalid') || whatsappNotice.includes('rejected')
+                        ? 'bg-[#141414] border-red-500/30 text-red-200'
+                        : 'bg-[#141414] border-white/10 text-gray-200'
+                    }`}>
+                      <AlertCircle size={15} className="shrink-0 text-gold mt-0.5" />
+                      <span className="leading-relaxed flex-1">{whatsappNotice.replace(/^[⚠️✅ℹ️✓]\s*/, '')}</span>
+                    </div>
+                  )}
+
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleSendTestWhatsApp}
+                      disabled={isSendingTestWhatsApp}
+                      className="w-full bg-gold hover:bg-gold-light text-black font-bold px-4 py-2.5 uppercase text-xs tracking-wider transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 rounded-sm shadow-sm"
+                    >
+                      {isSendingTestWhatsApp ? (
+                        <>
+                          <GoldSpinner size="xs" />
+                          <span>Dispatching WhatsApp Alert...</span>
+                        </>
+                      ) : (
+                        <>
+                          <MessageSquare size={14} />
+                          <span>Send Test WhatsApp Alert to {whatsappConfig.ownerWhatsAppNumber}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {directTestWhatsAppUrl && (
+                    <div className="pt-2">
+                      <a
+                        href={directTestWhatsAppUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full bg-white/5 hover:bg-gold hover:text-black text-gold border border-white/10 hover:border-gold font-bold px-4 py-2.5 uppercase text-xs tracking-wider transition-all flex items-center justify-center gap-2 rounded-sm shadow-sm cursor-pointer"
+                      >
+                        <MessageSquare size={15} />
+                        <span>Open Test in WhatsApp</span>
+                      </a>
+                    </div>
+                  )}
+
+                  {/* Automated Phone Delivery 2-Step Guide */}
+                  <div className="bg-[#0f0f0f] border border-white/10 p-4 space-y-3 text-[11px] text-gray-200 rounded-sm">
+                    <span className="font-semibold text-gold uppercase tracking-wider block text-xs flex items-center gap-2">
+                      <Zap size={14} className="text-gold" /> Direct Database-to-WhatsApp Setup (Zero Manual Clicks)
+                    </span>
+                    <p className="leading-relaxed text-gray-300 text-xs">
+                      To have the database send every lead directly to your WhatsApp phone without you having to click "Send", WhatsApp requires a 1-time phone authorization:
+                    </p>
+                    <div className="p-3.5 bg-[#141414] border border-white/10 space-y-3 rounded-sm">
+                      <div className="flex items-start gap-2.5">
+                        <span className="text-gold font-bold shrink-0 bg-white/5 px-2 py-0.5 border border-white/10 text-[10px]">STEP 1</span>
+                        <div className="space-y-1.5 flex-1">
+                          <span className="text-white font-semibold block">Get your Free WhatsApp API Key (Takes 10 Seconds):</span>
+                          <p className="text-gray-400 text-[11px]">
+                            Tap either button below on your phone to send <code className="text-gold">I allow callmebot to send me messages</code>. The bot will instantly text back your 6-digit API key.
+                          </p>
+                          <div className="flex items-center gap-2 flex-wrap pt-1">
+                            <a 
+                              href="https://wa.me/34644919680?text=I%20allow%20callmebot%20to%20send%20me%20messages" 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gold hover:bg-gold-light text-black font-bold rounded text-xs transition-colors shadow-sm"
+                            >
+                              <MessageSquare size={13} />
+                              <span>Message CallMeBot (+34 644 91 96 80)</span>
+                            </a>
+                            <a 
+                              href="https://wa.me/34644444444?text=I%20allow%20callmebot%20to%20send%20me%20messages" 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black-pure border border-white/20 hover:border-gold text-gray-300 hover:text-white font-bold rounded text-xs transition-colors"
+                            >
+                              <span>Alternative Bot (+34 644 44 44 44)</span>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2.5 pt-2 border-t border-white/10">
+                        <span className="text-gold font-bold shrink-0 bg-white/5 px-2 py-0.5 border border-white/10 text-[10px]">STEP 2</span>
+                        <div className="space-y-1">
+                          <span className="text-white font-semibold block">Paste Key in Settings &amp; Save:</span>
+                          <p className="text-gray-400 text-[11px]">
+                            Paste the 6-digit key into the <strong>CallMeBot Free API Key</strong> box above and click <em>Save WhatsApp Preferences</em>.
+                          </p>
+                          <p className="text-gray-300 font-mono text-[10px] mt-1">
+                            Once saved, the database automatically delivers all quotes and website activities straight to your WhatsApp phone 24/7 without manual intervention.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Real-Time Activity & WhatsApp Dispatches Feed */}
+              <div className="bg-black-pure border border-gold/30 hover:border-gold p-5 sm:p-7 lg:p-8 space-y-5 shadow-xl transition-all w-full">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-white/10">
+                  <div>
+                    <span className="text-[10px] font-mono text-gold uppercase tracking-widest block">Audit Trail</span>
+                    <h3 className="text-base font-heading text-white uppercase tracking-wider flex items-center gap-2 font-bold">
+                      <Zap size={16} className="text-gold" /> Real-Time Activity &amp; WhatsApp Dispatch Log
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <ExportButton
+                      data={whatsappDispatches}
+                      columns={[
+                        { header: 'Activity Type', key: 'activityType' },
+                        { header: 'Client / User Name', key: 'clientName' },
+                        { header: 'Client Email', key: 'clientEmail' },
+                        { header: 'Recipient Phone', key: 'recipientPhone' },
+                        { header: 'Service / Scope', key: 'service' },
+                        { header: 'Payload / Details', key: 'details' },
+                        { header: 'Timestamp', key: 'createdAt', format: (r: any) => r.createdAt ? new Date(r.createdAt).toLocaleString() : 'Recent' }
+                      ]}
+                      title="Natal Interior Design - WhatsApp Dispatch & Real-Time Audit Log"
+                      subtitle="Record of automated notifications sent directly to admin WhatsApp"
+                      category="WhatsApp Communications"
+                      filenamePrefix="natal_whatsapp_dispatches"
+                      summaryCards={[
+                        { label: 'Dispatches Recorded', value: whatsappDispatches.length },
+                        { label: 'Owner Recipient', value: whatsappConfig.ownerWhatsAppNumber || '+256...' },
+                        { label: 'Automated Triggers', value: 'Active' }
+                      ]}
+                      buttonLabel="Export WhatsApp Log"
+                      size="sm"
+                    />
+                    <span className="text-xs font-mono text-gray-400">
+                      {whatsappDispatches.length} Activity Dispatches Recorded
                     </span>
                   </div>
                 </div>
 
-                {mailNotice && (
-                  <div className="p-3 bg-emerald-950/80 border border-emerald-500/60 text-emerald-200 text-xs flex items-center gap-2">
-                    <CheckCircle size={15} className="text-emerald-400 shrink-0" />
-                    <span>{mailNotice}</span>
+                <p className="text-xs text-gray-300">
+                  Every user submission and client engagement triggers an automated notification stored here and routed to your WhatsApp.
+                </p>
+
+                {whatsappDispatches.length === 0 ? (
+                  <div className="py-8 text-center text-gray-500 text-xs font-mono border border-white/5 bg-black-rich">
+                    No dispatches recorded yet. Click "Send Test WhatsApp Alert" above or submit a quotation to test live.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border border-white/10">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-black-rich border-b border-white/10 text-gray-400 font-mono text-[10px] uppercase tracking-wider">
+                        <tr>
+                          <th className="py-2.5 px-3">Type</th>
+                          <th className="py-2.5 px-3">Client</th>
+                          <th className="py-2.5 px-3">Contact Details</th>
+                          <th className="py-2.5 px-3">Service / Brief</th>
+                          <th className="py-2.5 px-3">Status</th>
+                          <th className="py-2.5 px-3">Timestamp</th>
+                          <th className="py-2.5 px-3 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5 font-mono">
+                        {whatsappDispatches.map((record) => (
+                          <tr key={record.id} className="hover:bg-white/5 transition-colors">
+                            <td className="py-2.5 px-3">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gold/15 text-gold border border-gold/30">
+                                {record.activityType}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold text-white">
+                              {record.clientName || 'Visitor'}
+                            </td>
+                            <td className="py-2.5 px-3 text-gray-300 text-[11px]">
+                              <div>{record.clientPhone || 'No phone'}</div>
+                              <div className="text-gray-500 text-[10px]">{record.clientEmail || ''}</div>
+                            </td>
+                            <td className="py-2.5 px-3 text-gray-300 text-[11px] max-w-xs truncate">
+                              {record.service || record.details || 'General Inquiry'}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              {record.status === 'delivered_via_callmebot' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-500/40">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                  <span>Delivered</span>
+                                </span>
+                              ) : record.status === 'callmebot_key_invalid' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-amber-950 text-amber-300 border border-amber-500/40" title="CallMeBot rejected API key - Tap Send to send directly">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                                  <span>Invalid Key</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-blue-950 text-blue-300 border border-blue-500/40">
+                                  <span>1-Click Ready</span>
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-gray-400 text-[10px]">
+                              {new Date(record.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                <a
+                                  href={record.directWhatsAppUrl || getOwnerWhatsAppUrl(record)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] uppercase rounded transition-colors shadow-sm"
+                                  title={`Open formatted executive alert in WhatsApp for owner (${whatsappConfig.ownerWhatsAppNumber})`}
+                                >
+                                  <MessageSquare size={11} />
+                                  <span>Send to WhatsApp</span>
+                                </a>
+                                {record.clientPhone && (
+                                  <a
+                                    href={getClientWhatsAppReplyUrl(record.clientPhone, record.clientName, record.service)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-black-pure border border-emerald-500/40 hover:bg-emerald-950 text-emerald-300 font-bold text-[10px] uppercase rounded transition-colors"
+                                    title="Chat directly with client on WhatsApp"
+                                  >
+                                    <span>Reply Client</span>
+                                  </a>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
-
-                <div className="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleSendTestMail}
-                    disabled={isSendingTestMail}
-                    className="bg-gold hover:bg-gold-light active:bg-gold-dark text-black-pure font-bold px-5 py-2.5 uppercase text-xs tracking-wider transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 rounded-sm shadow-md"
-                  >
-                    {isSendingTestMail ? (
-                      <>
-                        <GoldSpinner size="xs" />
-                        <span>Dispatching Test Email...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Mail size={14} />
-                        <span>Send Test Email to {emailConfig.recipientEmail}</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Quick Activation Note */}
-                <div className="pt-3 border-t border-white/10 text-[11px] text-gray-300 space-y-2.5">
-                  <span className="font-semibold text-gold uppercase tracking-wider block text-xs">
-                    How Email Dispatch &amp; Testing Works:
-                  </span>
-                  <div className="bg-black-rich border border-gold/20 p-3.5 space-y-2 text-xs">
-                    <p className="flex items-start gap-2">
-                      <span className="text-gold font-bold shrink-0">Step 1:</span>
-                      <span>
-                        <strong>Recipient Inbox:</strong> Website leads (Quotations, Contact Inquiries, VIP registrations) are dispatched to the <strong>Recipient Email</strong> configured above (<code className="text-gold">{emailConfig.recipientEmail}</code>). If you want leads sent to your personal inbox, update the field above and click <em>Save Email Preferences</em>.
-                      </span>
-                    </p>
-                    <p className="flex items-start gap-2">
-                      <span className="text-gold font-bold shrink-0">Step 2:</span>
-                      <span>
-                        <strong>One-Time Activation Requirement:</strong> When an email address receives its first submission through FormSubmit, an activation email titled <em>"Action Required: Activate FormSubmit"</em> is sent to that address. <strong>You must open that email and click "Activate Form"</strong> once. Until clicked, FormSubmit holds submissions to prevent spam.
-                      </span>
-                    </p>
-                    <p className="flex items-start gap-2">
-                      <span className="text-gold font-bold shrink-0">Step 3:</span>
-                      <span>
-                        <strong>Check Spam / Junk Folder:</strong> If you test and don't immediately see the email in your Primary inbox, always check your <strong>Spam / Junk</strong> folder or the <strong>Promotions</strong> tab. Mark it as "Not Spam" to receive future leads directly into your inbox.
-                      </span>
-                    </p>
-                    <p className="flex items-start gap-2">
-                      <span className="text-gold font-bold shrink-0">Step 4:</span>
-                      <span>
-                        <strong>Client Auto-Confirmation:</strong> When a client fills their email in the Quotation Form, an automated confirmation receipt is also delivered to the client's inbox thanking them for reaching out to Natal Interior Design.
-                      </span>
-                    </p>
-                  </div>
-                </div>
               </div>
             </div>
           )}
@@ -5517,8 +6723,8 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                           <span className="text-[10px] font-mono uppercase tracking-widest mt-1 text-gold/70">Admin</span>
                         </div>
                       )}
-                      {/* Circular Live Dot on top of Profile */}
-                      <span className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center z-10 pointer-events-none" title="Owner Live">
+                      {/* Circular Live Dot at bottom of Profile */}
+                      <span className="absolute bottom-2 right-2 flex h-5 w-5 items-center justify-center z-10 pointer-events-none" title="Owner Live">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-black-pure shadow-[0_0_10px_rgba(16,185,129,0.9)]"></span>
                       </span>
@@ -5555,7 +6761,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     />
 
                     <span className="text-[10px] text-gray-500 font-mono text-center max-w-[220px] leading-relaxed">
-                      ✓ Real-time link: Profile picture in the website navigation bar is always identical to this picture
+                      Real-time link: Profile picture in the website navigation bar is always identical to this picture
                     </span>
                   </div>
 

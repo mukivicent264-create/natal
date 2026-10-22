@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   ArrowLeft, Check, Eye, EyeOff, User, Mail, Phone, Lock, 
   Sparkles, ShieldCheck, CheckCircle2, ArrowRight, Layers, ChevronDown,
-  Building, Tag, FileText, X
+  Building, Tag, FileText, X, AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
@@ -15,6 +15,8 @@ import {
   clearActiveUserSession, 
   getUserFromDirectory, 
   triggerOwnerEmailNotification,
+  triggerOwnerWhatsAppNotification,
+  triggerQuoteThankYouCallMeBot,
   sanitizeNameInput,
   isValidName,
   sanitizePhoneInput,
@@ -349,7 +351,7 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
           }
         });
 
-        // Trigger notification email to owner inbox for new VIP client registration
+        // Trigger notification email and automatic WhatsApp notification to owner for new VIP registration
         if (!isAdminEmail) {
           triggerOwnerEmailNotification({
             leadType: 'VIP Registration',
@@ -359,6 +361,27 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
             service: formData.service,
             details: `New VIP Client registered on Natal platform. Property type: ${formData.projectType || 'General'}. Scope: ${vipScopeDesc}`
           }).catch(mailErr => console.warn('Email trigger note:', mailErr));
+
+          // Automatically send WhatsApp notification directly to owner (+256 745 694 499)
+          triggerOwnerWhatsAppNotification({
+            leadType: 'VIP Registration',
+            name: formData.fullName.trim() || 'VIP Client',
+            email: formData.email.trim(),
+            phone: formData.phone.trim(),
+            service: formData.service || 'VIP Atelier Membership',
+            details: `New VIP Client registration on Natal platform. Property: ${formData.projectType || 'General'}. Scope: ${vipScopeDesc}`
+          }).catch(waErr => console.warn('Registration WhatsApp trigger note:', waErr));
+
+          // If client provided phone, automatically trigger thank-you confirmation receipt
+          if (formData.phone && formData.phone.trim()) {
+            triggerQuoteThankYouCallMeBot({
+              clientName: formData.fullName.trim() || 'Valued VIP Client',
+              clientPhone: formData.phone.trim(),
+              clientEmail: formData.email.trim(),
+              service: formData.service || 'VIP Atelier Membership',
+              details: `VIP Client registration successfully confirmed for ${formData.projectType || 'Interior & Construction'}.`
+            }).catch(tyErr => console.warn('Registration thank-you note:', tyErr));
+          }
         }
 
         setActiveUserSession({
@@ -665,8 +688,9 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
                           className={`w-full bg-black-rich/80 border ${nameError ? 'border-red-500/80 focus:border-red-500' : 'border-white/20 focus:border-gold'} px-4 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-gold/30 transition-all shadow-inner`}
                         />
                         {nameError && (
-                          <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1">
-                            <span>⚠</span> {nameError}
+                          <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1.5">
+                            <AlertCircle size={11} className="shrink-0" />
+                            <span>{nameError}</span>
                           </p>
                         )}
                       </div>
@@ -699,15 +723,16 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
                         className={`w-full bg-black-rich/80 border ${emailError ? 'border-red-500/80 focus:border-red-500' : 'border-white/20 focus:border-gold'} px-4 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-gold/30 transition-all shadow-inner`}
                       />
                       {emailError && (
-                        <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1">
-                          <span>⚠</span> {emailError}
+                        <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1.5">
+                          <AlertCircle size={11} className="shrink-0" />
+                          <span>{emailError}</span>
                         </p>
                       )}
 
                       {/* Admin Email Indicator */}
                       {formData.email.trim().toLowerCase().includes('admin') && (
-                        <div className="mt-2 p-2.5 bg-gradient-to-r from-gold/20 via-black-pure to-gold/15 border border-gold/60 flex items-center gap-2 text-xs">
-                          <span className="text-base leading-none">👑</span>
+                        <div className="mt-2 p-2.5 bg-black-rich border border-gold/40 flex items-center gap-2.5 text-xs">
+                          <ShieldCheck size={15} className="text-gold shrink-0" />
                           <span className="text-gold font-bold">
                             Administrator Email Recognized: Dashboard access will unlock in the Navigation Bar and mobile menu upon successful entry.
                           </span>
@@ -748,8 +773,9 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
                               className={`w-full max-w-full bg-black-rich/80 border ${phoneError ? 'border-red-500/80 focus:border-red-500' : 'border-white/20 focus:border-gold'} px-3.5 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-gold/30 transition-all font-mono shadow-inner box-border min-w-0`}
                             />
                             {phoneError && (
-                              <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1">
-                                <span>⚠</span> {phoneError}
+                              <p className="text-[10px] font-mono text-red-400 mt-1 flex items-center gap-1.5">
+                                <AlertCircle size={11} className="shrink-0" />
+                                <span>{phoneError}</span>
                               </p>
                             )}
                           </div>
@@ -849,8 +875,9 @@ export default function AuthPage({ onNavigateHome, initialMode }: AuthPageProps)
                         </button>
                       </div>
                       {passwordError && (
-                        <p className="text-[10px] font-mono text-red-400 mt-1.5 flex items-center gap-1">
-                          <span>⚠</span> {passwordError}
+                        <p className="text-[10px] font-mono text-red-400 mt-1.5 flex items-center gap-1.5">
+                          <AlertCircle size={11} className="shrink-0" />
+                          <span>{passwordError}</span>
                         </p>
                       )}
                     </div>

@@ -17,6 +17,13 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      proxy: {
+        '/api/callmebot': {
+          target: 'https://api.callmebot.com',
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/api\/callmebot/, '')
+        }
+      }
     },
   };
 });

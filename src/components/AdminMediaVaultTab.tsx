@@ -30,7 +30,8 @@ import {
   storeSafeMediaAssetInCloud, 
   loadMediaAssetData, 
   deleteMediaAssetFromCloud,
-  sanitizeForFirestore 
+  sanitizeForFirestore,
+  showAppNotification 
 } from '../utils';
 
 interface AdminMediaVaultTabProps {
@@ -123,7 +124,7 @@ export default function AdminMediaVaultTab({ onSelectAsset, selectionMode }: Adm
         setTimeout(() => setUploadNotice(''), 4500);
       }
     } catch (err: any) {
-      alert("Error uploading media file: " + (err?.message || String(err)));
+      showAppNotification("Error uploading media file: " + (err?.message || String(err)), "error");
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -137,7 +138,7 @@ export default function AdminMediaVaultTab({ onSelectAsset, selectionMode }: Adm
       const dataUrl = await loadMediaAssetData(asset);
       setActiveVideoModal({ asset, dataUrl });
     } catch (err) {
-      alert("Failed to load video stream.");
+      showAppNotification("Failed to load video stream.", "error");
     } finally {
       setLoadingMediaId(null);
     }
@@ -170,7 +171,7 @@ export default function AdminMediaVaultTab({ onSelectAsset, selectionMode }: Adm
       link.click();
       document.body.removeChild(link);
     } catch (err) {
-      alert("Failed to download asset.");
+      showAppNotification("Failed to download asset.", "error");
     } finally {
       setLoadingMediaId(null);
     }
@@ -188,7 +189,7 @@ export default function AdminMediaVaultTab({ onSelectAsset, selectionMode }: Adm
       setUploadNotice("Asset permanently removed from Cloud Database.");
       setTimeout(() => setUploadNotice(''), 3000);
     } catch (err: any) {
-      alert("Failed to delete asset: " + err.message);
+      showAppNotification("Failed to delete asset: " + err.message, "error");
     }
   };
 
@@ -207,7 +208,7 @@ export default function AdminMediaVaultTab({ onSelectAsset, selectionMode }: Adm
       setUploadNotice(`"${asset.name}" is now the active Homepage Hero Video across all laptops and real phones!`);
       setTimeout(() => setUploadNotice(''), 5000);
     } catch (err: any) {
-      alert("Failed to set as Hero Video: " + err.message);
+      showAppNotification("Failed to set as Hero Video: " + err.message, "error");
     } finally {
       setLoadingMediaId(null);
     }
@@ -231,7 +232,7 @@ export default function AdminMediaVaultTab({ onSelectAsset, selectionMode }: Adm
       setUploadNotice(`"${asset.name}" is now set as the official Website Logo across all devices!`);
       setTimeout(() => setUploadNotice(''), 5000);
     } catch (err: any) {
-      alert("Failed to set as Website Logo: " + err.message);
+      showAppNotification("Failed to set as Website Logo: " + err.message, "error");
     } finally {
       setLoadingMediaId(null);
     }
@@ -402,7 +403,7 @@ export default function AdminMediaVaultTab({ onSelectAsset, selectionMode }: Adm
           <p className="text-xs text-gray-500 mt-1 font-mono">Upload files using the upload bar above.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 w-full">
           {filteredAssets.map((asset) => {
             const isVideo = asset.type === 'video';
             const isBlueprint = asset.type === 'blueprint';
@@ -412,10 +413,10 @@ export default function AdminMediaVaultTab({ onSelectAsset, selectionMode }: Adm
             return (
               <div 
                 key={asset.id} 
-                className="group bg-black-pure border border-gold/30 hover:border-gold transition-all duration-300 flex flex-col justify-between overflow-hidden shadow-lg hover:shadow-[0_0_20px_rgba(212,175,55,0.25)]"
+                className="group bg-black-pure border border-gold/30 hover:border-gold transition-all duration-300 flex flex-col justify-between overflow-hidden shadow-md hover:shadow-[0_12px_28px_rgba(0,0,0,0.85)] w-full rounded-none"
               >
                 {/* Visual Thumbnail / Preview Area */}
-                <div className="relative aspect-video bg-black-rich overflow-hidden border-b border-white/10 flex items-center justify-center">
+                <div className="relative aspect-[16/10] sm:aspect-video min-h-[120px] sm:min-h-[140px] bg-black-rich overflow-hidden border-b border-white/10 flex items-center justify-center">
                   {isImage && (asset.thumbnail || asset.url) ? (
                     <img 
                       src={asset.thumbnail || asset.url} 
@@ -432,7 +433,7 @@ export default function AdminMediaVaultTab({ onSelectAsset, selectionMode }: Adm
                         />
                       ) : (
                         <div className="w-full h-full bg-gradient-to-br from-black via-zinc-900 to-black flex items-center justify-center">
-                          <Film size={36} className="text-gold/40" />
+                          <Film size={32} className="text-gold/40" />
                         </div>
                       )}
                       {/* Play Button Overlay */}
@@ -440,61 +441,61 @@ export default function AdminMediaVaultTab({ onSelectAsset, selectionMode }: Adm
                         type="button"
                         onClick={() => handlePlayVideo(asset)}
                         disabled={isLoadingThis}
-                        className="absolute inset-0 m-auto w-11 h-11 rounded-full bg-gold/90 hover:bg-gold text-black-pure flex items-center justify-center shadow-[0_0_20px_rgba(212,175,55,0.6)] hover:scale-110 transition-transform cursor-pointer z-10"
+                        className="absolute inset-0 m-auto w-9 h-9 rounded-full bg-gold/90 hover:bg-gold text-black-pure flex items-center justify-center shadow-[0_0_20px_rgba(212,175,55,0.7)] hover:scale-110 transition-transform cursor-pointer z-10"
                         title="Play"
                       >
                         {isLoadingThis ? (
                           <div className="w-4 h-4 border-2 border-black-pure border-t-transparent rounded-full animate-spin"></div>
                         ) : (
-                          <Play size={18} className="fill-black-pure ml-0.5" />
+                          <Play size={14} className="fill-black-pure ml-0.5" />
                         )}
                       </button>
                     </div>
                   ) : (
                     /* Blueprint or Document Preview */
-                    <div className="w-full h-full bg-[radial-gradient(#D4AF37_1px,transparent_1px)] [background-size:16px_16px] bg-black-rich flex flex-col items-center justify-center p-4 text-center">
-                      <FileText size={28} className="text-gold mb-1.5" />
-                      <span className="text-[10px] font-mono text-gold/80 uppercase tracking-wider">CAD Blueprint</span>
+                    <div className="w-full h-full bg-[radial-gradient(#D4AF37_1px,transparent_1px)] [background-size:16px_16px] bg-black-rich flex flex-col items-center justify-center p-3 text-center">
+                      <FileText size={26} className="text-gold mb-1" />
+                      <span className="text-[10px] font-mono text-gold/90 uppercase tracking-wider font-bold">CAD Plan</span>
                     </div>
                   )}
 
                   {/* Top Type Badge */}
-                  <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5">
-                    <span className="bg-black-pure/90 border border-gold/40 text-gold text-[9px] font-mono font-bold uppercase px-2 py-0.5 tracking-wider">
-                      {isVideo ? 'Video' : isBlueprint ? 'Blueprint' : 'Photo'}
+                  <div className="absolute top-1.5 left-1.5 z-10 flex items-center gap-1">
+                    <span className="bg-black-pure/95 border border-gold/60 text-gold text-[8px] sm:text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 tracking-wider shadow-sm">
+                      {isVideo ? 'Video' : isBlueprint ? 'Plan' : 'Photo'}
                     </span>
                   </div>
 
                   {/* Top Right Quick Actions */}
-                  <div className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity">
                     {isImage && (
                       <button
                         type="button"
                         onClick={() => setActivePhotoModal(asset)}
-                        className="p-1.5 bg-black-pure/80 border border-gold/40 text-gold hover:bg-gold hover:text-black-pure transition-colors cursor-pointer"
+                        className="p-1 bg-black-pure/90 border border-gold/50 text-gold hover:bg-gold hover:text-black-pure transition-colors cursor-pointer shadow-md"
                         title="View Fullscreen"
                       >
-                        <Maximize2 size={13} />
+                        <Maximize2 size={11} />
                       </button>
                     )}
                   </div>
                 </div>
 
                 {/* Content Info */}
-                <div className="p-3 flex-1 flex flex-col justify-between">
+                <div className="p-2 sm:p-2.5 lg:p-3 flex-1 flex flex-col justify-between">
                   <div>
-                    <h4 className="text-xs font-bold text-white line-clamp-1 group-hover:text-gold transition-colors" title={asset.name}>
+                    <h4 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-gold transition-colors" title={asset.name}>
                       {asset.name}
                     </h4>
 
                     <div className="flex items-center justify-between text-[10px] font-mono text-gray-400 mt-1">
-                      <span className="text-gold/80">{asset.category || 'Media'}</span>
+                      <span className="text-gold/90 font-medium truncate max-w-[80px]">{asset.category || 'Media'}</span>
                       <span>{asset.sizeFormatted || 'N/A'}</span>
                     </div>
                   </div>
 
                   {/* Action Buttons Footer */}
-                  <div className="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between gap-1.5">
+                  <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between gap-1 flex-wrap">
                     {selectionMode && onSelectAsset ? (
                       <button
                         type="button"

@@ -211,7 +211,7 @@ export default function FeaturedCreationsPage({ onNavigateHome }: FeaturedCreati
         <div className="absolute inset-0 bg-[radial-gradient(#D4AF37_1px,transparent_1px)] [background-size:24px_24px] opacity-15 pointer-events-none"></div>
 
         <div className="relative z-10 max-w-5xl mx-auto">
-          {/* Top Navigation with Arrow Only */}
+          {/* Top Navigation with Arrow and Theme Toggle */}
           <div className="flex items-center justify-between mb-2 sm:mb-2.5">
             <button
               onClick={() => onNavigateHome()}
