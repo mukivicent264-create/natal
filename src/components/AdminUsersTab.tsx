@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Users, User, UserPlus, Download, Search, Filter, X, CheckCircle, 
+  Users, User, UserPlus, Download, Search, Filter, X, CheckCircle, CheckCircle2,
   Sparkles, FileText, Mail, Phone, Calendar, Trash2, Check, Copy, 
   UserCheck, LayoutGrid, List, Table, ChevronRight, ChevronDown,
   ArrowUpDown, SlidersHorizontal, CheckSquare, Eye, ShieldCheck,
@@ -92,6 +92,8 @@ export interface AdminUsersTabProps {
   onExportCSV: () => void;
   notice?: string;
   onClearNotice?: () => void;
+  readNotificationIds?: string[];
+  onToggleNotificationRead?: (id: string) => void;
 }
 
 export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
@@ -102,7 +104,9 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
   onUpdateUser,
   onExportCSV,
   notice,
-  onClearNotice
+  onClearNotice,
+  readNotificationIds = [],
+  onToggleNotificationRead
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
@@ -115,7 +119,9 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
   const [isSortOpen, setIsSortOpen] = useState(false);
   const [reactingOption, setReactingOption] = useState<string | null>(null);
 
-  const [viewMode, setViewMode] = useState<'list' | 'table'>('list');
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'table'>(() => {
+    return (localStorage.getItem('natal_users_view_format') as 'grid' | 'list' | 'table') || 'grid';
+  });
   const [selectedUserDetail, setSelectedUserDetail] = useState<any | null>(null);
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
 
@@ -180,6 +186,10 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
         }
       };
       reader.readAsDataURL(file);
+    } finally {
+      if (e.target) {
+        e.target.value = '';
+      }
     }
   };
 
@@ -1015,26 +1025,64 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               )}
             </div>
 
-            {/* View Mode Toggle (List Format as Standard) */}
-            <div className="flex items-center border border-gold/30 bg-black-rich p-1 h-[38px] sm:h-[42px] gap-0.5">
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 transition-colors cursor-pointer flex items-center gap-1.5 rounded-sm ${viewMode === 'list' ? 'bg-gold text-black-pure font-bold shadow-sm' : 'text-gray-400 hover:text-white'}`}
-                title="Comprehensive List Format (Standard)"
-              >
-                <List size={14} />
-                <span className="text-[10px] font-mono uppercase tracking-wider font-bold">List Format</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('table')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 transition-colors cursor-pointer flex items-center gap-1.5 rounded-sm ${viewMode === 'table' ? 'bg-gold text-black-pure font-bold shadow-sm' : 'text-gray-400 hover:text-white'}`}
-                title="Dense Data Table"
-              >
-                <Table size={14} />
-                <span className="text-[10px] font-mono uppercase tracking-wider">Table</span>
-              </button>
+            {/* View Mode Toggle: Grid, List, Table */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {onToggleNotificationRead && filteredUsers.some(u => !u.role?.includes('Admin') && !u.email?.toLowerCase().includes('admin') && !readNotificationIds.includes(u.id || `user_${u.email}`)) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const unreadIds = filteredUsers
+                      .filter(u => !u.role?.includes('Admin') && !u.email?.toLowerCase().includes('admin'))
+                      .map(u => u.id || `user_${u.email}`)
+                      .filter(id => !readNotificationIds.includes(id));
+                    unreadIds.forEach(id => onToggleNotificationRead(id));
+                  }}
+                  className="px-2.5 py-1.5 sm:py-2 bg-gold/15 hover:bg-gold/25 border border-gold/40 text-gold hover:text-white text-[10px] font-mono uppercase tracking-wider rounded-sm transition-all cursor-pointer flex items-center gap-1.5 shadow-sm font-semibold h-[38px] sm:h-[42px]"
+                  title="Mark all listed client profiles as read / reviewed"
+                >
+                  <Check size={11} />
+                  <span>Mark All Read</span>
+                </button>
+              )}
+
+              <div className="flex items-center border border-gold/30 bg-black-rich p-1 h-[38px] sm:h-[42px] gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('grid');
+                    localStorage.setItem('natal_users_view_format', 'grid');
+                  }}
+                  className={`px-2.5 py-1.5 sm:px-3 sm:py-2 transition-colors cursor-pointer flex items-center gap-1.5 rounded-sm ${viewMode === 'grid' ? 'bg-gold text-black-pure font-bold shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                  title="Grid Format (2-Column Cards)"
+                >
+                  <LayoutGrid size={13} />
+                  <span className="text-[10px] font-mono uppercase tracking-wider font-bold">Grid</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('list');
+                    localStorage.setItem('natal_users_view_format', 'list');
+                  }}
+                  className={`px-2.5 py-1.5 sm:px-3 sm:py-2 transition-colors cursor-pointer flex items-center gap-1.5 rounded-sm ${viewMode === 'list' ? 'bg-gold text-black-pure font-bold shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                  title="List Format (Single Column Rows)"
+                >
+                  <List size={13} />
+                  <span className="text-[10px] font-mono uppercase tracking-wider font-bold">List</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('table');
+                    localStorage.setItem('natal_users_view_format', 'table');
+                  }}
+                  className={`px-2.5 py-1.5 sm:px-3 sm:py-2 transition-colors cursor-pointer flex items-center gap-1.5 rounded-sm ${viewMode === 'table' ? 'bg-gold text-black-pure font-bold shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                  title="Dense Data Table"
+                >
+                  <Table size={13} />
+                  <span className="text-[10px] font-mono uppercase tracking-wider">Table</span>
+                </button>
+              </div>
             </div>
 
             {(searchTerm || sourceFilter !== 'all' || roleFilter !== 'all' || sortOption !== 'newest') && (
@@ -1092,14 +1140,14 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
             )}
           </div>
         </div>
-      ) : viewMode === 'list' ? (
-        /* LIST FORMAT (Executive Feed Format - Matched to Notifications Stream Design) */
+      ) : viewMode === 'grid' ? (
+        /* GRID FORMAT (2-Column Executive Cards) */
         <div className="bg-black-pure border border-gold/30 p-4 sm:p-6 lg:p-7 rounded-sm shadow-xl space-y-3 font-sans">
           <div className="flex items-center justify-between pb-3 border-b border-white/10 flex-wrap gap-2">
             <div className="flex items-center gap-2">
-              <Users size={16} className="text-gold" />
+              <LayoutGrid size={16} className="text-gold" />
               <h3 className="text-sm font-heading uppercase tracking-widest text-gold font-bold">
-                Client Directory Feed ({filteredUsers.length})
+                Client Directory Cards ({filteredUsers.length})
               </h3>
             </div>
             <div className="flex items-center gap-2 font-mono text-xs flex-wrap">
@@ -1128,11 +1176,17 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
               const isVIPItem = !isAdminItem && (u.role === 'VIP Client' || u.source === 'Registration');
               const userTimestamp = getUserTimestamp(u);
               const isRecentUser = !isAdminItem && (userTimestamp > 0 ? (Date.now() - userTimestamp < 7 * 24 * 3600 * 1000) : (uIdx === 0 && !isAdminItem));
+              const userNotifId = u.id || `user_${u.email}`;
+              const isUnread = !readNotificationIds.includes(userNotifId) && !isAdminItem;
 
               return (
                 <div 
-                  key={u.id || u.email || `usr_list_${uIdx}`}
-                  className="p-4 sm:p-5 rounded-sm border border-white/10 bg-[#0f0f0f] hover:border-gold/30 hover:bg-[#141414] transition-all duration-200 flex flex-col justify-between"
+                  key={u.id || u.email || `usr_grid_${uIdx}`}
+                  className={`p-4 sm:p-5 rounded-sm border transition-all duration-200 flex flex-col justify-between ${
+                    isUnread
+                      ? 'border-gold/40 bg-[#141414] shadow-sm hover:border-gold/60'
+                      : 'border-white/10 bg-[#0f0f0f] hover:border-gold/30 hover:bg-[#141414]'
+                  }`}
                 >
                   <div className="flex flex-col justify-between gap-4 h-full">
                     {/* Left & Middle Column: Avatar, Name, Badges, Details, Contacts */}
@@ -1162,6 +1216,9 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                       <div className="min-w-0 flex-1 space-y-1">
                         {/* Name & Badges */}
                         <div className="flex items-center gap-2 flex-wrap">
+                          {isUnread && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-gold shrink-0 animate-pulse" title="Unread client registration" />
+                          )}
                           <h4 
                             onClick={() => handleOpenUserDetail(u)}
                             className="text-sm font-semibold text-white tracking-wide truncate hover:text-gold transition-colors cursor-pointer"
@@ -1258,8 +1315,28 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                       </div>
                     </div>
 
-                    {/* Bottom Actions Bar (WhatsApp, View Profile/Details, Delete) */}
+                    {/* Bottom Actions Bar (Mark Read, WhatsApp, View Profile/Details, Delete) */}
                     <div className="flex items-center gap-2 shrink-0 flex-wrap pt-3 border-t border-white/5 w-full justify-end">
+                      {/* Mark as Read / Reviewed Button */}
+                      {onToggleNotificationRead && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleNotificationRead(userNotifId);
+                          }}
+                          className={`px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all cursor-pointer flex items-center gap-1.5 border ${
+                            isUnread
+                              ? 'bg-emerald-950/80 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 font-bold'
+                              : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border-white/10'
+                          }`}
+                          title={isUnread ? 'Mark this client profile as reviewed' : 'Mark as unread'}
+                        >
+                          <CheckCircle2 size={12} className={isUnread ? 'text-emerald-400' : 'text-gray-500'} />
+                          <span>{isUnread ? 'Mark Read' : 'Reviewed'}</span>
+                        </button>
+                      )}
+
                       {/* Direct WhatsApp Button */}
                       {u.phone && (
                         <a
@@ -1294,6 +1371,213 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                         <Trash2 size={13} />
                       </button>
                     </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : viewMode === 'list' ? (
+        /* LIST FORMAT (Single Column Compact Rows - Aligned with Notifications & Leads List Format) */
+        <div className="bg-black-pure border border-gold/30 p-4 sm:p-6 lg:p-7 rounded-sm shadow-xl space-y-3 font-sans">
+          <div className="flex items-center justify-between pb-3 border-b border-white/10 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <List size={16} className="text-gold" />
+              <h3 className="text-sm font-heading uppercase tracking-widest text-gold font-bold">
+                Client Directory List ({filteredUsers.length})
+              </h3>
+            </div>
+            <div className="flex items-center gap-2 font-mono text-xs flex-wrap">
+              <span className="text-gray-400">Total:</span>
+              <span className="text-gold font-bold">{users.length} Profiles</span>
+              {adminCount > 0 && (
+                <span className="text-purple-300 font-mono text-[10px] px-2 py-0.5 bg-purple-950/80 border border-purple-500/50 rounded-full flex items-center gap-1">
+                  <ShieldCheck size={10} className="text-purple-400" />
+                  {adminCount} Admin{adminCount > 1 ? 's' : ''}
+                </span>
+              )}
+              {registrationCount > 0 && (
+                <span className="text-gold font-mono text-[10px] px-2 py-0.5 bg-gold/15 border border-gold/30 rounded-full flex items-center gap-1">
+                  <Sparkles size={10} className="text-gold" />
+                  {registrationCount} VIP
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3 w-full">
+            {filteredUsers.map((u, uIdx) => {
+              const initials = getUserInitials(u.name, u.email);
+              const isCopied = copiedEmail === u.email;
+              const isAdminItem = u.role === 'Administrator' || (u.email && u.email.toLowerCase().includes('admin'));
+              const isVIPItem = !isAdminItem && (u.role === 'VIP Client' || u.source === 'Registration');
+              const userTimestamp = getUserTimestamp(u);
+              const isRecentUser = !isAdminItem && (userTimestamp > 0 ? (Date.now() - userTimestamp < 7 * 24 * 3600 * 1000) : (uIdx === 0 && !isAdminItem));
+              const userNotifId = u.id || `user_${u.email}`;
+              const isUnread = !readNotificationIds.includes(userNotifId) && !isAdminItem;
+
+              return (
+                <div 
+                  key={u.id || u.email || `usr_row_${uIdx}`}
+                  className={`p-4 sm:p-5 rounded-sm border transition-all duration-200 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 ${
+                    isUnread
+                      ? 'border-gold/50 bg-[#141414] shadow-md hover:border-gold/70'
+                      : 'border-white/10 bg-[#0f0f0f] hover:border-white/20 hover:bg-[#141414]'
+                  }`}
+                >
+                  <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
+                    {/* Profile Avatar / Badge */}
+                    <div className="relative shrink-0 mt-0.5 sm:mt-0">
+                      <div className={`w-10 h-10 rounded-full shrink-0 flex items-center justify-center border font-bold font-serif text-xs overflow-hidden ${
+                        isAdminItem ? 'bg-white/5 border-gold/40 text-gold' : isVIPItem ? 'bg-white/5 border-gold/40 text-gold' : 'bg-white/5 border-white/15 text-gray-300'
+                      }`}>
+                        {u.photoURL ? (
+                          <img src={u.photoURL} alt={u.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <span>{initials || (isAdminItem ? 'ADM' : 'VIP')}</span>
+                        )}
+                      </div>
+                      {isUnread && (
+                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-gold border-2 border-black-pure animate-pulse" title="Unread profile" />
+                      )}
+                    </div>
+
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 
+                          onClick={() => handleOpenUserDetail(u)}
+                          className="text-sm font-semibold text-white tracking-wide truncate hover:text-gold transition-colors cursor-pointer"
+                        >
+                          {u.name || 'Anonymous Client'}
+                        </h4>
+
+                        {isRecentUser && (
+                          <span className="text-[9px] font-mono px-2 py-0.5 bg-gradient-to-r from-gold-dark via-gold to-yellow-300 text-black-pure font-bold rounded shadow-sm inline-flex items-center gap-1 uppercase tracking-wider animate-pulse">
+                            <Sparkles size={9} /> NEW USER
+                          </span>
+                        )}
+
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded border inline-flex items-center gap-1 font-semibold ${
+                          isAdminItem
+                            ? 'bg-purple-950/80 text-purple-300 border-purple-500/60'
+                            : isVIPItem
+                            ? 'bg-gold/15 text-gold border-gold/40'
+                            : 'bg-emerald-950/70 text-emerald-400 border-emerald-500/40'
+                        }`}>
+                          {isAdminItem ? <ShieldCheck size={11} className="text-purple-400" /> : isVIPItem ? <Sparkles size={11} className="text-gold" /> : <UserCheck size={11} className="text-emerald-400" />}
+                          {isAdminItem ? 'Administrator' : isVIPItem ? 'VIP Client' : (u.role || 'Client Lead')}
+                        </span>
+
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-white/5 text-gray-300 border border-white/10 rounded">
+                          {u.source === 'Registration' ? 'VIP Registration' : (u.source || 'Quotation Form')}
+                        </span>
+
+                        {u.service && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 bg-gold/10 text-gold border border-gold/25 rounded truncate max-w-[200px]">
+                            {u.service}
+                          </span>
+                        )}
+
+                        {u.estimatedBudget && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 rounded">
+                            {u.estimatedBudget}
+                          </span>
+                        )}
+                      </div>
+
+                      {u.details && (
+                        <p className="text-xs text-gray-300 font-sans line-clamp-1">
+                          {u.details}
+                        </p>
+                      )}
+
+                      <div className="flex items-center gap-3 text-[11px] text-gray-400 flex-wrap">
+                        {u.email && (
+                          <div className="flex items-center gap-1 font-mono text-gray-300">
+                            <Mail size={11} className="text-gray-500" />
+                            <a href={`mailto:${u.email}`} className="hover:text-gold transition-colors truncate max-w-[190px]">
+                              {u.email}
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyEmail(u.email)}
+                              className="text-gray-500 hover:text-gold p-0.5 transition-colors cursor-pointer"
+                              title="Copy email"
+                            >
+                              {isCopied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                            </button>
+                            {isCopied && <span className="text-emerald-400 text-[9px] font-bold">Copied!</span>}
+                          </div>
+                        )}
+
+                        {u.phone && (
+                          <div className="flex items-center gap-1 font-mono text-gray-300">
+                            <Phone size={11} className="text-gray-500" />
+                            <a href={`tel:${u.phone}`} className="hover:text-gold transition-colors">{u.phone}</a>
+                          </div>
+                        )}
+
+                        <span className="text-gray-500 font-mono text-[10px]">Joined: {formatDate(u.createdAt)}</span>
+
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono text-gold/80 px-2 py-0.5 bg-gold/10 border border-gold/20 rounded">
+                          <Zap size={10} className="text-gold" />
+                          <span>{u.activities?.length || u.activityCount || 1} {((u.activities?.length || u.activityCount || 1) === 1) ? 'Action' : 'Actions'}</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end pt-2 lg:pt-0 border-t lg:border-t-0 border-white/5">
+                    {/* Mark as Read / Reviewed Button */}
+                    {onToggleNotificationRead && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleNotificationRead(userNotifId);
+                        }}
+                        className={`px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all cursor-pointer flex items-center gap-1.5 border ${
+                          isUnread
+                            ? 'bg-emerald-950/80 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 font-bold'
+                            : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border-white/10'
+                        }`}
+                        title={isUnread ? 'Mark this client profile as reviewed' : 'Mark as unread'}
+                      >
+                        <CheckCircle2 size={12} className={isUnread ? 'text-emerald-400' : 'text-gray-500'} />
+                        <span>{isUnread ? 'Mark Read' : 'Reviewed'}</span>
+                      </button>
+                    )}
+
+                    {u.phone && (
+                      <a
+                        href={`https://wa.me/${normalizeWhatsAppNumber(u.phone)}?text=${encodeURIComponent(`Hello ${u.name || 'valued client'}, this is Natal Interior Design regarding your inquiry.`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 hover:text-white rounded-sm transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        title="Open WhatsApp chat with client"
+                      >
+                        <MessageSquare size={12} />
+                        <span>WhatsApp</span>
+                      </a>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleOpenUserDetail(u)}
+                      className="px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-gold/10 hover:bg-gold/25 border border-gold/30 text-gold hover:text-white rounded-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                      title="Open full client dossier & edit profile"
+                    >
+                      <span>Profile &rarr;</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onDeleteUser(u)}
+                      className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-950/40 rounded transition-colors cursor-pointer border border-transparent hover:border-red-500/30"
+                      title="Delete client record"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 </div>
               );
@@ -1472,6 +1756,24 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
                     {/* Actions */}
                     <td className="py-3.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-2">
+                        {onToggleNotificationRead && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const userNotifId = u.id || `user_${u.email}`;
+                              onToggleNotificationRead(userNotifId);
+                            }}
+                            className={`px-2 py-1 text-[10px] font-mono uppercase tracking-wider rounded-sm transition-all cursor-pointer flex items-center gap-1 border ${
+                              !readNotificationIds.includes(u.id || `user_${u.email}`) && !u.role?.includes('Admin') && !u.email?.toLowerCase().includes('admin')
+                                ? 'bg-emerald-950/80 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 font-bold'
+                                : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border-white/10'
+                            }`}
+                            title={!readNotificationIds.includes(u.id || `user_${u.email}`) ? 'Mark as read' : 'Mark as unread'}
+                          >
+                            <CheckCircle2 size={11} className={!readNotificationIds.includes(u.id || `user_${u.email}`) && !u.role?.includes('Admin') && !u.email?.toLowerCase().includes('admin') ? 'text-emerald-400' : 'text-gray-500'} />
+                            <span>{!readNotificationIds.includes(u.id || `user_${u.email}`) && !u.role?.includes('Admin') && !u.email?.toLowerCase().includes('admin') ? 'Mark Read' : 'Reviewed'}</span>
+                          </button>
+                        )}
                         <button
                           onClick={() => handleOpenUserDetail(u)}
                           className="px-2.5 py-1 bg-white/5 hover:bg-gold hover:text-black-pure border border-white/10 hover:border-gold text-[10px] font-mono uppercase tracking-wider transition-all cursor-pointer"
@@ -1511,12 +1813,30 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-5 border-b border-gold/20">
               <div className="flex items-center gap-4">
                 <div className="relative shrink-0 group">
-                  <div className="w-16 h-16 rounded-full bg-gold/15 border-2 border-gold text-gold font-bold font-serif text-2xl flex items-center justify-center shadow-[0_0_15px_rgba(212,175,55,0.3)] overflow-hidden">
+                  <div 
+                    onClick={() => userPhotoInputRef.current?.click()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        userPhotoInputRef.current?.click();
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    title="Click directly to upload or change profile photo"
+                    className="w-16 h-16 rounded-full bg-gold/15 border-2 border-gold hover:border-yellow-300 text-gold font-bold font-serif text-2xl flex items-center justify-center shadow-[0_0_15px_rgba(212,175,55,0.3)] overflow-hidden cursor-pointer transition-all relative focus:outline-none focus:ring-2 focus:ring-gold"
+                  >
                     {selectedUserDetail.photoURL ? (
-                      <img src={selectedUserDetail.photoURL} alt={selectedUserDetail.name} className="w-full h-full object-cover" />
+                      <img src={selectedUserDetail.photoURL} alt={selectedUserDetail.name} className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105" />
                     ) : (
                       <span>{getUserInitials(selectedUserDetail.name, selectedUserDetail.email) || (selectedUserDetail.name || 'U')[0].toUpperCase()}</span>
                     )}
+
+                    {/* Interactive hover overlay */}
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white pointer-events-none">
+                      <Camera size={15} className="text-yellow-300 animate-bounce" />
+                      <span className="text-[8px] font-mono uppercase tracking-wider text-white">Upload</span>
+                    </div>
                   </div>
                   {/* Circular Live Dot at bottom of avatar */}
                   <span className="absolute -bottom-0.5 -left-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none" title="Live Profile">

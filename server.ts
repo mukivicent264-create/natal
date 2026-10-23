@@ -49,6 +49,168 @@ app.post('/api/triggers/test', async (req, res) => {
   }
 });
 
+// Server-side robust email dispatch with FormSubmit and Web3Forms fallbacks
+app.post('/api/notifications/dispatch-email', async (req, res) => {
+  try {
+    const { 
+      recipientEmail = 'mukisavicent7777@gmail.com',
+      subject = 'New Client Activity Alert',
+      fields = {},
+      leadType = 'Website Activity',
+      clientName = 'Client',
+      clientEmail = '',
+      clientPhone = '',
+      service = '',
+      details = '',
+      fileAttachmentName = '',
+      web3FormsKey = ''
+    } = req.body || {};
+
+    const targetEmail = (recipientEmail || 'mukisavicent7777@gmail.com').trim().toLowerCase();
+    const cleanPhone = (clientPhone || '').trim();
+    const whatsappDigits = cleanPhone.replace(/\D/g, '').replace(/^0/, '256');
+    const whatsappLink = whatsappDigits.length >= 7 ? `https://wa.me/${whatsappDigits}` : null;
+
+    let formSubmitResult: any = null;
+    let web3FormsResult: any = null;
+    let activated = true;
+    let statusMessage = '';
+
+    // 1. Dispatch via FormSubmit with full server headers (Origin, Referer, Accept)
+    try {
+      const fsPayload: Record<string, any> = {
+        _subject: `🚨 [Natal Lead] ${leadType}: ${clientName} - ${service || 'General Inquiry'}`,
+        _template: 'box',
+        _captcha: 'false',
+        _replyto: clientEmail || undefined,
+        'Lead Type': leadType,
+        'Client Name': clientName,
+        'Client Email': clientEmail || 'N/A',
+        'Client Phone / WhatsApp': clientPhone || 'N/A',
+        'Service Requested': service || 'N/A',
+        'Project Scope / Details': details || 'N/A',
+        'Plan / Attachment': fileAttachmentName || 'None',
+        'WhatsApp Direct Link': whatsappLink || 'N/A',
+        'Submission Timestamp': new Date().toLocaleString(),
+        ...fields
+      };
+
+      const fsRes = await fetch(`https://formsubmit.co/ajax/${targetEmail}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Origin': 'https://nataldesign.com',
+          'Referer': 'https://nataldesign.com/'
+        },
+        body: JSON.stringify(fsPayload)
+      });
+
+      const fsData = await fsRes.json().catch(() => null);
+      if (fsData) {
+        formSubmitResult = fsData;
+        const rawMsg = typeof fsData.message === 'string' ? fsData.message : '';
+        const isActivationNeeded = 
+          rawMsg.toLowerCase().includes('activation') || 
+          rawMsg.toLowerCase().includes('activate') || 
+          rawMsg.toLowerCase().includes('confirm') ||
+          fsData.success === 'false' ||
+          fsData.success === false;
+
+        if (isActivationNeeded) {
+          activated = false;
+          statusMessage = `FormSubmit sent an activation email to ${targetEmail}. Please open your inbox (or spam) and click "Activate Form" once to complete setup.`;
+        } else {
+          statusMessage = `Email successfully delivered to ${targetEmail} via FormSubmit!`;
+        }
+      }
+    } catch (fsErr: any) {
+      console.warn('[Server Email] FormSubmit error:', fsErr?.message);
+    }
+
+    // 2. If Web3Forms key is configured, also dispatch via Web3Forms
+    if (web3FormsKey && web3FormsKey.trim()) {
+      try {
+        const w3Res = await fetch('https://api.web3forms.com/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({
+            access_key: web3FormsKey.trim(),
+            subject: `🚨 [Natal Lead] ${leadType}: ${clientName}`,
+            from_name: 'Natal Interior Design & Construction',
+            name: clientName,
+            email: clientEmail,
+            phone: clientPhone,
+            message: `Lead Type: ${leadType}\nService: ${service}\nDetails: ${details}\nAttachment: ${fileAttachmentName || 'None'}`
+          })
+        });
+        web3FormsResult = await w3Res.json().catch(() => null);
+      } catch (w3Err: any) {
+        console.warn('[Server Email] Web3Forms error:', w3Err?.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      delivered: activated && (formSubmitResult?.success === 'true' || formSubmitResult?.success === true || web3FormsResult?.success === true),
+      activated,
+      recipient: targetEmail,
+      message: statusMessage || 'Email notification processed.',
+      formSubmitResult,
+      web3FormsResult
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message });
+  }
+});
+
+// Endpoint to check FormSubmit activation status or resend activation link
+app.post('/api/notifications/check-email-status', async (req, res) => {
+  try {
+    const { email = 'mukisavicent7777@gmail.com' } = req.body || {};
+    const targetEmail = (email || 'mukisavicent7777@gmail.com').trim().toLowerCase();
+
+    const checkRes = await fetch(`https://formsubmit.co/ajax/${targetEmail}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Origin': 'https://nataldesign.com',
+        'Referer': 'https://nataldesign.com/'
+      },
+      body: JSON.stringify({
+        _subject: 'Natal Design Cloud - Email Gateway Activation Ping',
+        _template: 'box',
+        _captcha: 'false',
+        'Service Verification': 'Testing connection to owner inbox',
+        'Target Inbox': targetEmail,
+        'Timestamp': new Date().toLocaleString()
+      })
+    });
+
+    const data = await checkRes.json().catch(() => ({}));
+    const rawMsg = typeof data.message === 'string' ? data.message : '';
+    const needsActivation = 
+      rawMsg.toLowerCase().includes('activation') || 
+      rawMsg.toLowerCase().includes('activate') || 
+      rawMsg.toLowerCase().includes('confirm') ||
+      data.success === 'false' ||
+      data.success === false;
+
+    res.json({
+      success: true,
+      isActivated: !needsActivation,
+      targetEmail,
+      message: needsActivation 
+        ? `FormSubmit has sent an activation email to "${targetEmail}". Open your Gmail (check Inbox & Spam) and click "Activate Form" once.` 
+        : `Email gateway is active! Delivery to "${targetEmail}" is verified.`,
+      raw: data
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message });
+  }
+});
+
 // Server-side proxy for CallMeBot WhatsApp API to bypass CORS
 app.get('/api/callmebot/whatsapp.php', async (req, res) => {
   try {

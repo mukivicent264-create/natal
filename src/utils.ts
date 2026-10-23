@@ -769,9 +769,24 @@ export async function updateUserInDirectory(
       (u.email && u.email.toLowerCase() === clean)
     );
 
-    if (index === -1) return null;
+    let current: AppUser;
+    const targetDocId = userIdOrEmail.includes('@') ? `user_${clean.replace(/[^a-z0-9]/g, '_')}` : userIdOrEmail;
+    if (index >= 0) {
+      current = list[index];
+    } else {
+      current = {
+        id: targetDocId,
+        name: updates.name || (clean.includes('@') ? clean.split('@')[0] : 'Client'),
+        email: clean.includes('@') ? clean : '',
+        role: 'VIP Client',
+        status: 'Active',
+        source: 'Registration',
+        createdAt: new Date().toISOString(),
+        lastActive: new Date().toISOString()
+      };
+      list.unshift(current);
+    }
 
-    const current = list[index];
     const updated: AppUser = {
       ...current,
       ...updates,
@@ -782,17 +797,32 @@ export async function updateUserInDirectory(
       delete updated.photoURL;
     }
 
-    list[index] = updated;
+    const saveIdx = list.findIndex(u => u.id === updated.id || (updated.email && u.email && u.email.toLowerCase() === updated.email.toLowerCase()));
+    if (saveIdx >= 0) {
+      list[saveIdx] = updated;
+    } else {
+      list.unshift(updated);
+    }
     localStorage.setItem('natal_local_users', JSON.stringify(list));
 
-    // Persist to Firestore
+    // Persist to Firestore permanently
     try {
-      const userRef = doc(db, 'users', updated.id);
+      const userRef = doc(db, 'users', updated.id || targetDocId);
       await setDoc(userRef, {
         ...updated,
         photoURL: updated.photoURL || null,
         updatedAt: serverTimestamp()
       }, { merge: true });
+
+      if (clean && clean.includes('@')) {
+        const altDocId = `user_${clean.replace(/[^a-z0-9]/g, '_')}`;
+        if (altDocId !== updated.id) {
+          await setDoc(doc(db, 'users', altDocId), {
+            photoURL: updated.photoURL || null,
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        }
+      }
     } catch (fbErr) {
       console.warn("Firestore user update fallback:", fbErr);
     }
@@ -1199,8 +1229,21 @@ export async function recordUserActivity(params: {
       custom: 'General Lead'
     };
 
+    const mappedLeadType = leadTypeLabels[params.type] || 'General Lead';
+
+    // 1. Dispatch Email notification for this website activity
+    triggerOwnerEmailNotification({
+      leadType: mappedLeadType,
+      name: targetUser?.name || name,
+      phone: targetUser?.phone || phone,
+      email: targetUser?.email || email,
+      service: params.metadata?.service || params.metadata?.projectTitle || 'Direct Client Consultation',
+      details: params.description
+    }).catch(emailErr => console.warn('Automatic Email activity dispatch note:', emailErr));
+
+    // 2. Dispatch WhatsApp notification for this website activity
     triggerOwnerWhatsAppNotification({
-      leadType: leadTypeLabels[params.type] || 'General Lead',
+      leadType: mappedLeadType,
       name: targetUser?.name || name,
       phone: targetUser?.phone || phone,
       email: targetUser?.email || email,
@@ -1976,7 +2019,7 @@ export async function seedInitialDatabaseIfEmpty(force = false): Promise<{
 }
 
 export interface OwnerEmailTriggerParams {
-  leadType: 'Quotation Request' | 'Contact Form' | 'VIP Registration';
+  leadType: 'Quotation Request' | 'Contact Form' | 'VIP Registration' | 'WhatsApp Inquiry' | 'General Lead' | 'Phone Call Inquiry' | string;
   name: string;
   email: string;
   phone?: string;
@@ -2114,55 +2157,77 @@ ${params.fileAttachmentName ? `Attachment: ${params.fileAttachmentName}` : ''}
 
     let serviceResult: { success: boolean; message?: string; activated?: boolean } = { success: true };
 
-    // 1. Direct Delivery to Configured Inbox via FormSubmit AJAX API
+    // 1. Direct Delivery to Configured Inbox via Server Route (with proper origin headers & multi-provider fallback)
     if (emailSettings.serviceEnabled && targetEmail) {
       try {
-        const autoReplyMessage = params.email 
-          ? `Dear ${params.name || 'Valued Client'},\n\nThank you for reaching out to Natal Interior Design & Construction regarding your ${params.leadType.toLowerCase()} for "${params.service || 'Interior Design & Construction'}".\n\nWe have safely received your project scope and specifications. Our lead project engineer is reviewing your details and will follow up with you directly via WhatsApp or phone call shortly.\n\nWarm regards,\nNatal Interior Design & Construction\nKampala, Uganda`
-          : undefined;
-
-        const response = await fetch(`https://formsubmit.co/ajax/${targetEmail}`, {
+        const serverResponse = await fetch('/api/notifications/dispatch-email', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            _subject: `🚨 [Natal Lead] ${params.leadType}: ${params.name} - ${params.service || 'General Inquiry'}`,
-            _template: 'box',
-            _captcha: 'false',
-            _replyto: params.email || undefined,
-            _autoresponse: autoReplyMessage,
-            'Lead Type': params.leadType,
-            'Client Name': params.name,
-            'Client Email': params.email || 'N/A',
-            'Client Phone / WhatsApp': params.phone || 'N/A',
-            'Service Requested': params.service || 'N/A',
-            'Project Scope / Details': params.details || 'N/A',
-            'Plan / File Attachment': params.fileAttachmentName || 'None',
-            'WhatsApp Direct Link': whatsappLink || 'N/A',
-            'Submission Timestamp': new Date().toLocaleString()
+            recipientEmail: targetEmail,
+            leadType: params.leadType,
+            clientName: params.name,
+            clientEmail: params.email || '',
+            clientPhone: params.phone || '',
+            service: params.service || '',
+            details: params.details || '',
+            fileAttachmentName: params.fileAttachmentName || '',
+            web3FormsKey: emailSettings.web3FormsKey || ''
           })
         });
 
-        const resData = await response.json().catch(() => null);
-        if (resData) {
-          const rawMsg = typeof resData.message === 'string' ? resData.message : '';
-          const isActivationPrompt = 
-            rawMsg.toLowerCase().includes('activate') || 
-            rawMsg.toLowerCase().includes('confirm') || 
-            resData.success === 'false' || 
-            resData.success === false;
-
+        const serverData = await serverResponse.json().catch(() => null);
+        if (serverData) {
           serviceResult = {
-            success: resData.success === 'true' || resData.success === true,
-            message: rawMsg || (isActivationPrompt ? 'Activation email dispatched to inbox' : 'Delivered'),
-            activated: !isActivationPrompt
+            success: Boolean(serverData.success),
+            message: serverData.message,
+            activated: serverData.activated
           };
         }
-      } catch (e: any) {
-        console.warn('Direct mail dispatch note:', e);
-        serviceResult = { success: false, message: e?.message || 'Network dispatch notice' };
+      } catch (srvErr) {
+        // Fallback to client-side FormSubmit fetch if server is unreachable
+        try {
+          const response = await fetch(`https://formsubmit.co/ajax/${targetEmail}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+              _subject: `🚨 [Natal Lead] ${params.leadType}: ${params.name} - ${params.service || 'General Inquiry'}`,
+              _template: 'box',
+              _captcha: 'false',
+              _replyto: params.email || undefined,
+              'Lead Type': params.leadType,
+              'Client Name': params.name,
+              'Client Email': params.email || 'N/A',
+              'Client Phone / WhatsApp': params.phone || 'N/A',
+              'Service Requested': params.service || 'N/A',
+              'Project Scope / Details': params.details || 'N/A',
+              'Plan / File Attachment': params.fileAttachmentName || 'None',
+              'WhatsApp Direct Link': whatsappLink || 'N/A',
+              'Submission Timestamp': new Date().toLocaleString()
+            })
+          });
+          const resData = await response.json().catch(() => null);
+          if (resData) {
+            const rawMsg = typeof resData.message === 'string' ? resData.message : '';
+            const isActivationPrompt = 
+              rawMsg.toLowerCase().includes('activate') || 
+              rawMsg.toLowerCase().includes('confirm') || 
+              resData.success === 'false' || 
+              resData.success === false;
+
+            serviceResult = {
+              success: resData.success === 'true' || resData.success === true,
+              message: rawMsg || (isActivationPrompt ? 'Activation email dispatched to inbox' : 'Delivered'),
+              activated: !isActivationPrompt
+            };
+          }
+        } catch (e: any) {
+          console.warn('Direct mail dispatch note:', e);
+          serviceResult = { success: false, message: e?.message || 'Network dispatch notice' };
+        }
       }
     }
 
@@ -2395,45 +2460,29 @@ export async function triggerOwnerWhatsAppNotification(params: OwnerWhatsAppTrig
     }
 
     const cleanOwnerDigits = normalizeWhatsAppNumber(waSettings.ownerWhatsAppNumber);
-    const clientPhoneDigits = params.phone ? params.phone.replace(/\D/g, '').replace(/^0/, '256') : '';
 
     const lines: string[] = [
-      `🏛️ *NATAL INTERIOR DESIGN & CONSTRUCTION*`,
-      `🚨 *NEW CLIENT ACTIVITY NOTIFICATION*`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `📋 *Activity Type:* ${params.leadType}`,
-      `👤 *Client Name:* ${params.name || 'Valued Client'}`
+      `*NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+      `*Activity:* ${params.leadType}`,
+      `*Name:* ${params.name || 'Client'}`
     ];
 
     if (params.phone && params.phone.trim()) {
-      lines.push(`📱 *Phone / WhatsApp:* ${params.phone.trim()}`);
+      lines.push(`*Phone:* ${params.phone.trim()}`);
     }
     if (params.email && params.email.trim()) {
-      lines.push(`✉️ *Client Email:* ${params.email.trim()}`);
+      lines.push(`*Email:* ${params.email.trim()}`);
     }
     if (params.service && params.service.trim()) {
-      lines.push(`🛠️ *Service Requested:* ${params.service.trim()}`);
-    }
-    if (params.fileAttachmentName && params.fileAttachmentName.trim()) {
-      lines.push(`📎 *Attached Plan / File:* ${params.fileAttachmentName.trim()}`);
+      lines.push(`*Service:* ${params.service.trim()}`);
     }
     if (params.details && params.details.trim()) {
-      lines.push(`📝 *Project Scope / Brief:*`);
-      lines.push(`${params.details.trim()}`);
+      lines.push(`*Details:* ${params.details.trim()}`);
     }
-
-    lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    lines.push(`⏱️ *Timestamp:* ${new Date().toLocaleString()}`);
-    lines.push(`🌐 *Channel:* Natal Design Cloud Web Portal`);
-
-    if (clientPhoneDigits && clientPhoneDigits.length >= 7) {
-      lines.push(``);
-      lines.push(`💬 *Direct WhatsApp Reply to Client:*`);
-      lines.push(`https://wa.me/${clientPhoneDigits}`);
+    if (params.fileAttachmentName && params.fileAttachmentName.trim()) {
+      lines.push(`*Attachment:* ${params.fileAttachmentName.trim()}`);
     }
-
-    lines.push(``);
-    lines.push(`_Automated direct dispatch to Studio Owner (${waSettings.ownerWhatsAppNumber})_`);
+    lines.push(`*Date:* ${new Date().toLocaleString()}`);
 
     const formattedMessage = lines.join('\n');
     const directWhatsAppUrl = `https://wa.me/${cleanOwnerDigits}?text=${encodeURIComponent(formattedMessage)}`;
@@ -2487,8 +2536,13 @@ export async function triggerOwnerWhatsAppNotification(params: OwnerWhatsAppTrig
           gatewayResponse = { status: 500, ok: false, message: err?.message || 'Network error reaching CallMeBot' };
         }
       } else {
-        dispatchStatus = 'callmebot_key_required';
-        gatewayResponse = { status: 400, ok: false, message: 'CallMeBot API Key is missing. Follow the 1-tap setup guide in Admin Settings.' };
+        dispatchStatus = 'ready_for_direct_whatsapp';
+        gatewayResponse = { 
+          status: 200, 
+          ok: true, 
+          directReady: true,
+          message: `Direct WhatsApp Alert formatted and ready for instant delivery to owner (+256 ${waSettings.ownerWhatsAppNumber}).` 
+        };
       }
     } else if (waSettings.gatewayProvider === 'ultramsg' && waSettings.ultraMsgInstanceId && waSettings.ultraMsgToken) {
       try {
@@ -2653,40 +2707,24 @@ export function formatOwnerLeadWhatsAppMessage(lead: {
   timestamp?: string | number;
   id?: string;
 }): string {
-  const waSettings = getWhatsAppServiceSettings();
   const lines: string[] = [
-    `🏛️ *NATAL INTERIOR DESIGN & CONSTRUCTION*`,
-    `🚨 *NEW CLIENT LEAD / INQUIRY*`,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-    `📋 *Activity:* ${lead.leadType || 'Project Consultation Request'}`,
-    `👤 *Client Name:* ${lead.name || 'Valued Client'}`
+    `*NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+    `*Activity:* ${lead.leadType || 'Client Inquiry'}`,
+    `*Name:* ${lead.name || 'Client'}`
   ];
   if (lead.phone && lead.phone.trim()) {
-    lines.push(`📱 *Client Phone / WhatsApp:* ${lead.phone.trim()}`);
+    lines.push(`*Phone:* ${lead.phone.trim()}`);
   }
   if (lead.email && lead.email.trim()) {
-    lines.push(`✉️ *Client Email:* ${lead.email.trim()}`);
+    lines.push(`*Email:* ${lead.email.trim()}`);
   }
   if (lead.service && lead.service.trim()) {
-    lines.push(`🛠️ *Service Requested:* ${lead.service.trim()}`);
+    lines.push(`*Service:* ${lead.service.trim()}`);
   }
   if (lead.details && lead.details.trim()) {
-    lines.push(`📝 *Project Scope / Brief:*`);
-    lines.push(`${lead.details.trim()}`);
+    lines.push(`*Details:* ${lead.details.trim()}`);
   }
-  lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-  lines.push(`⏱️ *Logged In Database:* ${new Date(lead.timestamp || Date.now()).toLocaleString()}`);
-  if (lead.id) {
-    lines.push(`💾 *Database Record ID:* ${lead.id}`);
-  }
-  if (lead.phone && lead.phone.trim()) {
-    const cleanClient = normalizeWhatsAppNumber(lead.phone);
-    lines.push(``);
-    lines.push(`💬 *Direct WhatsApp Reply to Client:*`);
-    lines.push(`https://wa.me/${cleanClient}`);
-  }
-  lines.push(``);
-  lines.push(`_Routing to Studio Owner: ${waSettings.ownerWhatsAppNumber}_`);
+  lines.push(`*Date:* ${new Date(lead.timestamp || Date.now()).toLocaleString()}`);
   return lines.join('\n');
 }
 
@@ -2709,7 +2747,7 @@ export function getClientWhatsAppReplyUrl(rawPhone: string, clientName?: string,
   const cleanDigits = normalizeWhatsAppNumber(rawPhone);
   const greeting = clientName ? `Dear ${clientName}` : 'Hello';
   const serviceMention = service ? ` regarding "${service}"` : '';
-  const text = `${greeting},\n\nThank you for contacting Natal Interior Design & Construction${serviceMention}! Our project engineering team in Kampala has received your specifications from our web portal and is ready to assist you.`;
+  const text = `${greeting},\n\nThank you for contacting Natal Interior Design & Construction${serviceMention}. Our team has received your submission and is reviewing your request.`;
   return `https://wa.me/${cleanDigits}?text=${encodeURIComponent(text)}`;
 }
 
@@ -2776,42 +2814,33 @@ export async function triggerQuoteThankYouCallMeBot(params: QuoteThankYouParams)
     }
 
     const lines: string[] = [
-      `🏛️ *NATAL INTERIOR DESIGN & CONSTRUCTION*`,
-      `*Quotation Request Received & Confirmed*`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `Dear *${params.clientName || 'Valued Client'}*,`,
+      `*NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+      `*Quotation Request Received*`,
       ``,
-      `Thank you for requesting a project quotation with Natal Interior Design & Construction! 🤝`,
+      `Dear ${params.clientName || 'Client'},`,
       ``,
-      `📋 *Inquiry Summary:*`,
-      `• *Service Requested:* ${params.service || 'Interior Design & Construction'}`,
-      `• *Client Name:* ${params.clientName || 'Valued Client'}`,
-      `• *Contact Phone:* ${rawPhone}`,
+      `Thank you for requesting a quotation with Natal Interior Design & Construction. We have received your inquiry.`,
+      ``,
+      `*Service:* ${params.service || 'Interior Design & Construction'}`,
+      `*Phone:* ${rawPhone}`
     ];
 
     if (params.clientEmail && params.clientEmail.trim()) {
-      lines.push(`• *Email:* ${params.clientEmail.trim()}`);
+      lines.push(`*Email:* ${params.clientEmail.trim()}`);
     }
 
     if (params.details && params.details.trim()) {
       const trimmedDetails = params.details.trim().length > 120 
         ? params.details.trim().substring(0, 120) + '...' 
         : params.details.trim();
-      lines.push(`• *Project Scope:* ${trimmedDetails}`);
+      lines.push(`*Details:* ${trimmedDetails}`);
     }
 
     lines.push(``);
-    lines.push(`⚙️ *Status:* Under Review by Lead Engineering Team`);
-    lines.push(`⏱️ *Expected Response:* Within 2 Business Hours`);
+    lines.push(`Our engineering team will assess your requirements and contact you with a detailed breakdown.`);
     lines.push(``);
-    lines.push(`Our senior design & construction engineers in Kampala are reviewing your specifications and will get in touch with you directly via call or WhatsApp with your customized estimate.`);
-    lines.push(``);
-    lines.push(`💬 *Direct Studio Desk:*`);
-    lines.push(`📞 +256 745 694 499 / +256 777 568 259`);
-    lines.push(`✉️ info@natalinteriors.com`);
-    lines.push(`🌐 Kampala, Uganda`);
-    lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    lines.push(`_Automated confirmation receipt from Natal Design Web Portal._`);
+    lines.push(`Natal Interior Design & Construction`);
+    lines.push(`Kampala, Uganda`);
 
     const formattedMessage = params.customMessage || lines.join('\n');
     const directWhatsAppUrl = `https://wa.me/${cleanPhoneDigits}?text=${encodeURIComponent(formattedMessage)}`;

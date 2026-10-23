@@ -9,7 +9,8 @@ import {
   Sparkles, ExternalLink, Calendar, Phone, Mail, FileText, Menu, X, Bell, User, SplitSquareHorizontal, ArrowLeft, ChevronDown,
   Briefcase, Edit3, Layers, Paintbrush, ArrowUp, ArrowRight, Check, Settings, AlertCircle, EyeOff, ChevronUp, RotateCcw, Sliders,
   Hammer, HardHat, Zap, Droplet, TreePine, Building2, UserCheck, UserPlus, Search, Download, Filter, MessageSquare, Copy, Camera,
-  Lock, Unlock, HardDrive, Film, Video, FileUp, Play, Database, FileCode, FolderArchive, CheckCircle2, Clock
+  Lock, Unlock, HardDrive, Film, Video, FileUp, Play, Database, FileCode, FolderArchive, CheckCircle2, Clock, Loader2,
+  LayoutGrid, List
 } from 'lucide-react';
 import NatalLogo from './NatalLogo';
 import { 
@@ -185,6 +186,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [adminProfile, setAdminProfileState] = useState<AdminProfileData>(getAdminProfile);
   const adminFileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingAdminPhoto, setIsUploadingAdminPhoto] = useState(false);
 
   // Sync admin profile in real-time across navigation bar and admin suite
   useEffect(() => {
@@ -207,8 +209,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setIsUploadingAdminPhoto(true);
     try {
-      const compressed = await compressImageFile(file, 600, 600, 0.82);
+      const compressed = await compressImageFile(file, 600, 600, 0.85);
       await setAdminProfile({ photoURL: compressed });
       setAdminProfileState(prev => ({ ...prev, photoURL: compressed }));
       setUsers(prev => prev.map(u => {
@@ -217,8 +220,8 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
         }
         return u;
       }));
-      setSuccessNotice("Admin profile picture updated and synchronized with navigation bar & User List!");
-      setTimeout(() => setSuccessNotice(''), 4000);
+      setSuccessNotice("Admin profile picture updated permanently in Cloud Database!");
+      setTimeout(() => setSuccessNotice(''), 4500);
     } catch (err) {
       console.warn("Admin photo compression fallback:", err);
       const reader = new FileReader();
@@ -233,11 +236,19 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
             }
             return u;
           }));
-          setSuccessNotice("Admin profile picture updated!");
-          setTimeout(() => setSuccessNotice(''), 4000);
+          setSuccessNotice("Admin profile picture updated permanently in Cloud Database!");
+          setTimeout(() => setSuccessNotice(''), 4500);
         }
+        setIsUploadingAdminPhoto(false);
       };
+      reader.onerror = () => setIsUploadingAdminPhoto(false);
       reader.readAsDataURL(file);
+      return;
+    } finally {
+      setIsUploadingAdminPhoto(false);
+      if (e.target) {
+        e.target.value = '';
+      }
     }
   };
 
@@ -273,7 +284,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     }
   });
 
-  // Calculate unread notifications count strictly from real database records (real CRM leads, registered clients, and WhatsApp dispatches)
+  // Calculate unread notifications count strictly from real database records (CRM leads, registered clients, WhatsApp dispatches, and website activities)
   const unreadNotificationsCount = useMemo(() => {
     let count = 0;
     // Real CRM leads from Firestore
@@ -299,8 +310,15 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
         count++;
       }
     });
+    // Real website user activities from Firestore & local
+    userActivities.forEach((act: any, idx: number) => {
+      const id = act.id || `act_${act.timestamp || idx}`;
+      if (!readNotificationIds.includes(id)) {
+        count++;
+      }
+    });
     return count;
-  }, [leads, users, whatsappDispatches, readNotificationIds]);
+  }, [leads, users, whatsappDispatches, userActivities, readNotificationIds]);
 
   const handleMarkAllNotificationsRead = () => {
     const allIds: string[] = [];
@@ -314,6 +332,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     });
     whatsappDispatches.forEach((rec: any, idx: number) => {
       allIds.push(rec.id || `wa_${rec.createdAt || idx}`);
+    });
+    userActivities.forEach((act: any, idx: number) => {
+      allIds.push(act.id || `act_${act.timestamp || idx}`);
     });
     const updated = Array.from(new Set([...readNotificationIds, ...allIds]));
     setReadNotificationIds(updated);
@@ -342,8 +363,31 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     }
   };
 
-  const [notificationFilter, setNotificationFilter] = useState<'all' | 'unread' | 'leads' | 'users' | 'whatsapp'>('all');
+  const [notificationFilter, setNotificationFilter] = useState<'all' | 'unread' | 'activities' | 'leads' | 'users' | 'whatsapp'>('all');
   const [notificationSearch, setNotificationSearch] = useState('');
+
+  // Persistent Grid vs List View Formats for all lists across the dashboard
+  const [notificationsViewFormat, setNotificationsViewFormat] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('natal_notifications_view_format') as 'grid' | 'list') || 'list';
+  });
+  const [leadsViewFormat, setLeadsViewFormat] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('natal_leads_view_format') as 'grid' | 'list') || 'list';
+  });
+  const [projectsViewFormat, setProjectsViewFormat] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('natal_projects_view_format') as 'grid' | 'list') || 'grid';
+  });
+  const [servicesViewFormat, setServicesViewFormat] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('natal_services_view_format') as 'grid' | 'list') || 'grid';
+  });
+  const [testimonialsViewFormat, setTestimonialsViewFormat] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('natal_testimonials_view_format') as 'grid' | 'list') || 'grid';
+  });
+  const [transformationsViewFormat, setTransformationsViewFormat] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('natal_transformations_view_format') as 'grid' | 'list') || 'grid';
+  });
+  const [commsViewFormat, setCommsViewFormat] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('natal_comms_view_format') as 'grid' | 'list') || 'list';
+  });
 
   const [isEditingAdminName, setIsEditingAdminName] = useState(false);
   const [adminNameInput, setAdminNameInput] = useState('');
@@ -573,6 +617,12 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
   const [directTestWhatsAppUrl, setDirectTestWhatsAppUrl] = useState('');
   const [latestIncomingAlert, setLatestIncomingAlert] = useState<DispatchedWhatsAppRecord | null>(null);
   const [gatewayTestResult, setGatewayTestResult] = useState<{ status: 'idle' | 'testing' | 'success' | 'error'; message: string } | null>(null);
+  const [emailStatusResult, setEmailStatusResult] = useState<{
+    checked: boolean;
+    isActivated: boolean;
+    message: string;
+    loading: boolean;
+  } | null>(null);
   const isInitialSnapshotRef = useRef(true);
 
   // Listen for WhatsApp activity dispatches in real-time
@@ -590,7 +640,19 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       }
     };
     window.addEventListener('natal_whatsapp_activity_dispatched', handleDispatched);
-    return () => window.removeEventListener('natal_whatsapp_activity_dispatched', handleDispatched);
+    const handleActivity = (e: any) => {
+      if (e?.detail) {
+        setUserActivities(prev => [e.detail, ...prev.filter(a => a.id !== e.detail.id)]);
+        playActivityChime();
+        setSuccessNotice(`⚡ New Activity: ${e.detail.title || 'Client interaction recorded'}`);
+        setTimeout(() => setSuccessNotice(''), 4000);
+      }
+    };
+    window.addEventListener('natal_activity_recorded', handleActivity);
+    return () => {
+      window.removeEventListener('natal_whatsapp_activity_dispatched', handleDispatched);
+      window.removeEventListener('natal_activity_recorded', handleActivity);
+    };
   }, [whatsappConfig.autoOpenWhatsAppInAdminOnNewLead]);
 
   // Listen to Firestore whatsapp_notifications collection in real-time
@@ -1024,16 +1086,38 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
         }
       });
 
-      // 2. Always merge local storage registered users so new profiles appear immediately
+      // 2. Always merge local storage registered users so new profiles appear immediately & photos are preserved
       localUsers.forEach((lu: any) => {
         const key = (lu.email ? lu.email.toLowerCase().trim() : '') || lu.id || lu.phone;
-        if (key && !map.has(key)) {
-          map.set(key, { 
-            ...lu,
-            activities: Array.isArray(lu.activities) ? [...lu.activities] : []
-          });
+        if (key) {
+          if (!map.has(key)) {
+            map.set(key, { 
+              ...lu,
+              activities: Array.isArray(lu.activities) ? [...lu.activities] : []
+            });
+          } else {
+            const existing = map.get(key);
+            map.set(key, {
+              ...lu,
+              ...existing,
+              photoURL: existing.photoURL || lu.photoURL,
+              activities: existing.activities?.length ? existing.activities : (Array.isArray(lu.activities) ? lu.activities : [])
+            });
+          }
         }
       });
+
+      // Maintain admin avatar across admin user records in the directory
+      const activeAdminProfile = getAdminProfile();
+      if (activeAdminProfile?.photoURL) {
+        map.forEach((u, k) => {
+          if (u.role === 'Administrator' || u.isAdmin || k.includes('admin')) {
+            if (!u.photoURL) {
+              u.photoURL = activeAdminProfile.photoURL;
+            }
+          }
+        });
+      }
 
       // 3. Merge real quotation & contact leads from Firestore (fall back to local only if database has none)
       const allLeads = extraFbLeads.length > 0 ? extraFbLeads : localLeads;
@@ -1258,8 +1342,16 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       const colActivities = collection(db, 'user_activities');
       unsubActivities = onSnapshot(colActivities, (snapshot) => {
         const fbActivities = sortByTimestamp(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        latestFbActivities = fbActivities;
-        setUserActivities(fbActivities);
+        const local = JSON.parse(localStorage.getItem('natal_user_activities') || '[]');
+        const combined = [...fbActivities];
+        local.forEach((la: any) => {
+          if (!combined.some(ca => ca.id === la.id)) {
+            combined.unshift(la);
+          }
+        });
+        const finalActivities = sortByTimestamp(combined);
+        latestFbActivities = finalActivities;
+        setUserActivities(finalActivities);
         setUsers(syncAndAggregateUsers(latestFbUsers, latestFbLeads, latestFbActivities));
       }, (err) => {
         console.warn("Firestore user_activities snapshot fallback:", err);
@@ -1272,19 +1364,116 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       setUserActivities(local);
     }
 
+    let unsubAdminSettings = () => {};
+    try {
+      unsubAdminSettings = onSnapshot(doc(db, 'site_settings', 'admin_profile'), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data) {
+            setAdminProfileState(prev => {
+              const updated = {
+                ...prev,
+                name: data.name || prev.name,
+                email: data.email || prev.email,
+                role: data.role || prev.role || 'Full System Access',
+                photoURL: data.photoURL !== undefined ? (data.photoURL || undefined) : prev.photoURL
+              };
+              if (data.photoURL) {
+                localStorage.setItem('natal_user_avatar', data.photoURL);
+                localStorage.setItem('natal_admin_avatar', data.photoURL);
+              } else if (data.photoURL === null || data.photoURL === '') {
+                localStorage.removeItem('natal_user_avatar');
+                localStorage.removeItem('natal_admin_avatar');
+              }
+              localStorage.setItem('natal_admin_profile', JSON.stringify(updated));
+              return updated;
+            });
+          }
+        }
+      }, (err) => {
+        console.warn("Firestore admin_profile listener note:", err);
+      });
+    } catch (e) {
+      console.warn("Firestore admin_profile setup note:", e);
+    }
+
     const handleCustomUserUpdate = () => {
+      setUsers(syncAndAggregateUsers(latestFbUsers, latestFbLeads, latestFbActivities));
+    };
+    const handleActivityRecorded = (e: any) => {
+      const act = e?.detail;
+      if (act && (act.type === 'quotation' || act.type === 'contact' || act.type === 'whatsapp' || act.type === 'call' || act.type === 'specs_inquiry' || act.type === 'registration')) {
+        const actLines = [
+          `*NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+          `*Activity:* ${act.title || 'Client Activity'}`,
+          `*Name:* ${act.userName || 'Client'}`
+        ];
+        if (act.userPhone) actLines.push(`*Phone:* ${act.userPhone}`);
+        if (act.userEmail) actLines.push(`*Email:* ${act.userEmail}`);
+        if (act.metadata?.service) actLines.push(`*Service:* ${act.metadata.service}`);
+        if (act.description) actLines.push(`*Details:* ${act.description}`);
+        actLines.push(`*Date:* ${new Date().toLocaleString()}`);
+
+        const waRecord: DispatchedWhatsAppRecord = {
+          id: 'act_alert_' + (act.id || Date.now()),
+          recipientPhone: whatsappConfig.ownerWhatsAppNumber,
+          activityType: act.title || 'Client Activity',
+          clientName: act.userName || 'Client',
+          clientPhone: act.userPhone || '',
+          clientEmail: act.userEmail || '',
+          service: act.metadata?.service || 'Interior Consultation',
+          details: act.description || '',
+          message: `${act.title}: ${act.description || ''}`,
+          directWhatsAppUrl: `https://wa.me/${normalizeWhatsAppNumber(whatsappConfig.ownerWhatsAppNumber)}?text=${encodeURIComponent(actLines.join('\n'))}`,
+          status: 'ready_for_direct_whatsapp',
+          createdAt: new Date().toISOString()
+        };
+        setLatestIncomingAlert(waRecord);
+        playActivityChime();
+      }
       setUsers(syncAndAggregateUsers(latestFbUsers, latestFbLeads, latestFbActivities));
     };
     const handleLeadSubmitted = (e: any) => {
       const newLead = e?.detail;
       if (newLead) {
         setLeads(prev => [newLead, ...prev.filter(l => l.id !== newLead.id)]);
+        const leadLines = [
+          `*NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+          `*Activity:* ${newLead.service === 'General Inquiry' ? 'Contact Form' : 'Quotation Request'}`,
+          `*Name:* ${newLead.name || 'Client'}`
+        ];
+        if (newLead.phone) leadLines.push(`*Phone:* ${newLead.phone}`);
+        if (newLead.email) leadLines.push(`*Email:* ${newLead.email}`);
+        if (newLead.service) leadLines.push(`*Service:* ${newLead.service}`);
+        if (newLead.details) leadLines.push(`*Details:* ${newLead.details}`);
+        leadLines.push(`*Date:* ${new Date().toLocaleString()}`);
+
+        const waRecord: DispatchedWhatsAppRecord = {
+          id: 'lead_alert_' + (newLead.id || Date.now()),
+          recipientPhone: whatsappConfig.ownerWhatsAppNumber,
+          activityType: newLead.service === 'General Inquiry' ? 'Contact Form' : 'Quotation Request',
+          clientName: newLead.name || 'Client',
+          clientPhone: newLead.phone || '',
+          clientEmail: newLead.email || '',
+          service: newLead.service || 'Interior Consultation',
+          details: newLead.details || '',
+          message: `New Lead: ${newLead.name} (${newLead.service})`,
+          directWhatsAppUrl: `https://wa.me/${normalizeWhatsAppNumber(whatsappConfig.ownerWhatsAppNumber)}?text=${encodeURIComponent(leadLines.join('\n'))}`,
+          status: 'ready_for_direct_whatsapp',
+          createdAt: new Date().toISOString()
+        };
+        setLatestIncomingAlert(waRecord);
+        if (whatsappConfig.autoOpenWhatsAppInAdminOnNewLead && waRecord.directWhatsAppUrl) {
+          try {
+            window.open(waRecord.directWhatsAppUrl, '_blank');
+          } catch {}
+        }
       }
       playActivityChime();
       setUsers(syncAndAggregateUsers(latestFbUsers, latestFbLeads, latestFbActivities));
     };
     window.addEventListener('natal_users_updated', handleCustomUserUpdate);
-    window.addEventListener('natal_activity_recorded', handleCustomUserUpdate);
+    window.addEventListener('natal_activity_recorded', handleActivityRecorded);
     window.addEventListener('natal_lead_submitted', handleLeadSubmitted);
 
     return () => {
@@ -1294,8 +1483,9 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
       unsubLeads();
       unsubUsers();
       unsubActivities();
+      unsubAdminSettings();
       window.removeEventListener('natal_users_updated', handleCustomUserUpdate);
-      window.removeEventListener('natal_activity_recorded', handleCustomUserUpdate);
+      window.removeEventListener('natal_activity_recorded', handleActivityRecorded);
       window.removeEventListener('natal_lead_submitted', handleLeadSubmitted);
       unsubTestimonials();
       unsubTransformations();
@@ -2378,6 +2568,37 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
     }
   };
 
+  // Handle Check Email Gateway Status
+  const handleCheckEmailStatus = async () => {
+    setEmailStatusResult({
+      checked: true,
+      isActivated: false,
+      message: 'Checking FormSubmit gateway activation status...',
+      loading: true
+    });
+    try {
+      const res = await fetch('/api/notifications/check-email-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailConfig.recipientEmail || 'mukisavicent7777@gmail.com' })
+      });
+      const data = await res.json().catch(() => ({}));
+      setEmailStatusResult({
+        checked: true,
+        isActivated: !!data.isActivated,
+        message: data.message || (data.isActivated ? 'Email gateway is verified and active!' : 'Activation email sent. Please check your inbox.'),
+        loading: false
+      });
+    } catch (err: any) {
+      setEmailStatusResult({
+        checked: true,
+        isActivated: false,
+        message: err?.message || 'Error checking activation status',
+        loading: false
+      });
+    }
+  };
+
   // Handle Save WhatsApp Service Configuration
   const handleSaveWhatsAppConfig = (e: React.FormEvent) => {
     e.preventDefault();
@@ -3399,6 +3620,20 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   </a>
                 )}
                 <button
+                  type="button"
+                  onClick={() => {
+                    if (latestIncomingAlert.id) {
+                      handleMarkSingleNotificationRead(latestIncomingAlert.id);
+                    }
+                    setLatestIncomingAlert(null);
+                  }}
+                  className="px-3 py-2 bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-300 hover:text-emerald-100 font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 rounded-sm transition-all cursor-pointer font-semibold shadow-sm"
+                  title="Mark this incoming alert as read"
+                >
+                  <Check size={13} className="text-emerald-400" />
+                  <span>Mark as Read</span>
+                </button>
+                <button
                   onClick={() => setLatestIncomingAlert(null)}
                   className="p-2 text-gray-400 hover:text-white text-xs transition-colors cursor-pointer"
                   title="Dismiss alert"
@@ -4145,30 +4380,131 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   })}
                 </div>
 
-                {/* Instant Search Bar */}
-                <div className="relative">
-                  <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input 
-                    value={cardSearchQuery}
-                    onChange={e => setCardSearchQuery(e.target.value)}
-                    placeholder="Filter cards by title, category, or description..."
-                    className="w-full bg-black-pure border border-gold/30 pl-10 pr-10 py-2.5 text-white text-xs placeholder:text-gray-500 focus:outline-none focus:border-gold"
-                  />
-                  {cardSearchQuery && (
-                    <button 
+                {/* Instant Search Bar & Grid/List Format Toggle */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                  <div className="relative flex-1">
+                    <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input 
+                      value={cardSearchQuery}
+                      onChange={e => setCardSearchQuery(e.target.value)}
+                      placeholder="Filter cards by title, category, or description..."
+                      className="w-full bg-black-pure border border-gold/30 pl-10 pr-10 py-2.5 text-white text-xs placeholder:text-gray-500 focus:outline-none focus:border-gold"
+                    />
+                    {cardSearchQuery && (
+                      <button 
+                        type="button"
+                        onClick={() => setCardSearchQuery('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs cursor-pointer"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center self-end sm:self-auto border border-gold/30 bg-black-pure p-1 shrink-0">
+                    <button
                       type="button"
-                      onClick={() => setCardSearchQuery('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs"
+                      onClick={() => {
+                        setProjectsViewFormat('grid');
+                        localStorage.setItem('natal_projects_view_format', 'grid');
+                      }}
+                      className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                        projectsViewFormat === 'grid'
+                          ? 'bg-gold text-black-pure font-bold shadow-sm'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                      title="Grid Format (6 Columns)"
                     >
-                      <X size={14} />
+                      <LayoutGrid size={13} />
+                      <span>Grid</span>
                     </button>
-                  )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProjectsViewFormat('list');
+                        localStorage.setItem('natal_projects_view_format', 'list');
+                      }}
+                      className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                        projectsViewFormat === 'list'
+                          ? 'bg-gold text-black-pure font-bold shadow-sm'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                      title="List Format (Compact Rows)"
+                    >
+                      <List size={13} />
+                      <span>List</span>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Cards Grid */}
+                {/* Cards Grid or List */}
                 {visibleSectionCards.length === 0 ? (
                   <div className="p-8 text-center bg-black-pure/50 border border-gold/20 text-gray-400 text-sm">
                     No cards matching the search query in this section.
+                  </div>
+                ) : projectsViewFormat === 'list' ? (
+                  <div className="space-y-2.5 w-full">
+                    {visibleSectionCards.map((card, cIdx) => (
+                      <div
+                        key={card.id ? `${card.id}-${cIdx}` : `card-list-${cIdx}`}
+                        className={`bg-black-pure border ${
+                          editingCardMeta?.id === card.id
+                            ? 'border-gold shadow-[0_0_24px_rgba(212,175,55,0.7)] ring-1 ring-gold'
+                            : 'border-white/10 hover:border-gold/40'
+                        } p-3 sm:p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3.5 transition-all shadow-sm`}
+                      >
+                        <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
+                          <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 bg-black-rich border border-gold/30 overflow-hidden relative">
+                            <img src={card.image} alt={card.title} className="w-full h-full object-cover" />
+                            <div className="absolute bottom-0 inset-x-0 bg-black-pure/80 text-[8px] font-mono text-gold text-center py-0.5 truncate">
+                              {card.sectionLabel || card.section}
+                            </div>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <span className="text-gold text-[10px] uppercase tracking-widest font-mono font-semibold">
+                                {card.category}
+                              </span>
+                              {card.isEdited && (
+                                <span className="bg-amber-500 text-black-pure text-[8px] uppercase tracking-wider font-mono font-extrabold px-1.5 py-0.5">
+                                  Edited
+                                </span>
+                              )}
+                              <span className="text-emerald-400 text-[10px] font-mono flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Live
+                              </span>
+                            </div>
+                            <h4 className="text-white font-medium text-sm sm:text-base line-clamp-1">{card.title}</h4>
+                            <p className="text-gray-400 text-xs line-clamp-2 mt-0.5 leading-relaxed font-light">{card.desc}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto border-t sm:border-t-0 pt-2 sm:pt-0 border-white/5">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditCard(card)}
+                            className="px-3 py-1.5 bg-black-rich hover:bg-gold hover:text-black-pure text-gold border border-gold/40 transition-colors cursor-pointer text-xs font-mono font-semibold flex items-center gap-1"
+                            title="Edit this card"
+                          >
+                            <Edit3 size={12} />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteOrResetCard(card)}
+                            className={`px-3 py-1.5 transition-colors cursor-pointer text-xs font-mono flex items-center gap-1 ${
+                              card.isBase
+                                ? 'bg-neutral-900 hover:bg-neutral-700 text-amber-300 border border-amber-500/50'
+                                : 'bg-red-950/90 hover:bg-red-700 text-white border border-red-500'
+                            }`}
+                            title={card.isBase ? (card.isEdited ? 'Reset edits to default' : 'Revert') : 'Delete creation'}
+                          >
+                            {card.isBase ? <RotateCcw size={12} /> : <Trash2 size={12} />}
+                            <span>{card.isBase ? (card.isEdited ? 'Reset' : 'Revert') : 'Delete'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 w-full">
@@ -4607,7 +4943,43 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Grid vs List View Mode Toggle */}
+                    <div className="flex items-center border border-gold/30 bg-black-pure p-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setServicesViewFormat('grid');
+                          localStorage.setItem('natal_services_view_format', 'grid');
+                        }}
+                        className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                          servicesViewFormat === 'grid'
+                            ? 'bg-gold text-black-pure font-bold shadow-sm'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                        title="Grid Format (6 Columns)"
+                      >
+                        <LayoutGrid size={13} />
+                        <span>Grid</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setServicesViewFormat('list');
+                          localStorage.setItem('natal_services_view_format', 'list');
+                        }}
+                        className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                          servicesViewFormat === 'list'
+                            ? 'bg-gold text-black-pure font-bold shadow-sm'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                        title="List Format (Compact Rows)"
+                      >
+                        <List size={13} />
+                        <span>List</span>
+                      </button>
+                    </div>
+
                     {hiddenServiceIds.length > 0 && (
                       <button
                         type="button"
@@ -4636,6 +5008,99 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     >
                       Restore Default Services
                     </button>
+                  </div>
+                ) : servicesViewFormat === 'list' ? (
+                  <div className="space-y-2.5 w-full">
+                    {allCombinedServices.map((service, idx) => (
+                      <div 
+                        key={service.id ? `${service.id}-${idx}` : `svc-list-${idx}`}
+                        className="bg-black-pure border border-white/10 hover:border-gold/40 p-3 sm:p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3.5 transition-all shadow-sm"
+                      >
+                        <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
+                          {/* Rank & Icon / Thumbnail */}
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="w-6 text-center text-xs font-mono font-bold text-gold">
+                              #{idx + 1}
+                            </span>
+                            {service.image ? (
+                              <div className="w-16 h-12 sm:w-20 sm:h-14 bg-black-rich border border-gold/30 overflow-hidden shrink-0">
+                                <img src={service.image} alt={service.title} className="w-full h-full object-cover" />
+                              </div>
+                            ) : (
+                              <div className="w-12 h-12 bg-black-rich border border-white/10 flex items-center justify-center shrink-0 text-gold">
+                                {renderDisciplineIcon(service.icon, 20)}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <h4 className="text-white font-heading text-sm sm:text-base font-bold uppercase tracking-wide truncate">
+                                {service.title}
+                              </h4>
+                              {service.isCustom && (
+                                <span className="text-[8px] font-mono px-1.5 py-0.5 bg-emerald-900/60 border border-emerald-500/50 text-emerald-300 uppercase font-semibold">
+                                  Custom
+                                </span>
+                              )}
+                              {service.isEdited && (
+                                <span className="text-[8px] font-mono px-1.5 py-0.5 bg-amber-900/60 border border-amber-500/50 text-amber-300 uppercase font-semibold">
+                                  Edited
+                                </span>
+                              )}
+                              <span className="text-emerald-400 text-[10px] font-mono flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Live
+                              </span>
+                            </div>
+                            <p className="text-gray-300 text-xs line-clamp-2 font-light leading-relaxed mb-1.5">
+                              {service.description}
+                            </p>
+                            {service.features && Array.isArray(service.features) && service.features.length > 0 && (
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {service.features.slice(0, 3).map((feat: string, fIdx: number) => (
+                                  <span key={fIdx} className="text-[9px] font-mono text-gray-400 bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-none flex items-center gap-1">
+                                    <span className="w-1 h-1 rounded-full bg-gold"></span> {feat}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto border-t sm:border-t-0 pt-2 sm:pt-0 border-white/5">
+                          {idx > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handlePromoteService(service)}
+                              className="px-2.5 py-1.5 bg-black-rich hover:bg-gold hover:text-black text-gray-300 border border-white/20 hover:border-gold transition-colors cursor-pointer text-xs font-mono font-medium flex items-center gap-1"
+                              title="Elevate to Position #1"
+                            >
+                              <ArrowUp size={12} />
+                              <span>Top</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleEditService(service)}
+                            className="px-3 py-1.5 bg-black-rich hover:bg-gold hover:text-black-pure text-gold border border-gold/40 transition-colors cursor-pointer text-xs font-mono font-semibold flex items-center gap-1"
+                            title="Edit this service"
+                          >
+                            <Edit3 size={12} />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteOrHideService(service)}
+                            className="px-2.5 py-1.5 bg-red-950/80 hover:bg-red-700 text-white border border-red-500/50 transition-colors cursor-pointer text-xs font-mono flex items-center gap-1"
+                            title={service.isBase ? "Hide from website" : "Delete service"}
+                          >
+                            <Trash2 size={12} />
+                            <span>{service.isBase ? 'Hide' : 'Delete'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 w-full">
@@ -4770,14 +5235,69 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           {/* TAB 2: CLIENT LEADS & INQUIRIES */}
           {activeTab === 'leads' && (
             <div className="space-y-6">
-              <div className="border-b border-gold/20 pb-3 flex items-center justify-between">
+              <div className="border-b border-gold/20 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <span className="text-[10px] font-mono text-gold uppercase tracking-widest">Inquiries & Quotes</span>
                   <h2 className="text-xl font-heading text-white uppercase tracking-wider">
                     Client Leads & Quote Requests
                   </h2>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  {/* Grid vs List View Mode Toggle */}
+                  <div className="flex items-center border border-gold/30 bg-black-pure p-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLeadsViewFormat('grid');
+                        localStorage.setItem('natal_leads_view_format', 'grid');
+                      }}
+                      className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                        leadsViewFormat === 'grid'
+                          ? 'bg-gold text-black-pure font-bold shadow-sm'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                      title="Grid Format (Cards)"
+                    >
+                      <LayoutGrid size={13} />
+                      <span>Grid</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLeadsViewFormat('list');
+                        localStorage.setItem('natal_leads_view_format', 'list');
+                      }}
+                      className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                        leadsViewFormat === 'list'
+                          ? 'bg-gold text-black-pure font-bold shadow-sm'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                      title="List Format (Compact Rows)"
+                    >
+                      <List size={13} />
+                      <span>List</span>
+                    </button>
+                  </div>
+
+                  {leads.some((l: any) => !readNotificationIds.includes(l.id)) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const leadIds = leads.map((l: any) => l.id).filter(Boolean);
+                        const updated = Array.from(new Set([...readNotificationIds, ...leadIds]));
+                        setReadNotificationIds(updated);
+                        localStorage.setItem('natal_read_notification_ids', JSON.stringify(updated));
+                        setSuccessNotice("All leads marked as read.");
+                        setTimeout(() => setSuccessNotice(''), 3000);
+                      }}
+                      className="px-3 py-1.5 bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-300 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 rounded-sm transition-all cursor-pointer font-semibold shadow-sm"
+                      title="Mark all leads as read"
+                    >
+                      <Check size={13} />
+                      <span>Mark All as Read</span>
+                    </button>
+                  )}
+
                   <ExportButton
                     data={leads}
                     columns={[
@@ -4823,19 +5343,210 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   <p className="text-gray-300 font-medium text-sm">No client quote requests yet.</p>
                   <p className="text-xs text-gray-500 mt-1">When clients fill out the "Request a Quote" form, their details will appear here.</p>
                 </div>
+              ) : leadsViewFormat === 'list' ? (
+                /* LEADS LIST FORMAT */
+                <div className="space-y-3 w-full">
+                  {leads.map((lead, lIdx) => {
+                    const isUnread = !readNotificationIds.includes(lead.id);
+                    return (
+                      <div 
+                        key={lead.id ? `${lead.id}-${lIdx}` : `lead-list-${lIdx}`}
+                        className={`bg-[#0f0f0f] border ${
+                          isUnread ? 'border-gold/50 bg-[#141414] shadow-md' : 'border-white/10 hover:border-gold/30'
+                        } rounded-sm p-4 sm:p-5 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 transition-all`}
+                      >
+                        <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
+                          {/* Unread indicator & Icon */}
+                          <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gold shrink-0 relative mt-0.5 sm:mt-0">
+                            <Mail size={16} />
+                            {isUnread && (
+                              <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-red-500 border-2 border-black-pure animate-pulse" title="Unread Lead" />
+                            )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              {isUnread && (
+                                <span className="px-2 py-0.5 bg-red-600/20 text-red-400 border border-red-500/40 text-[9px] font-mono font-bold rounded-sm uppercase tracking-wider">
+                                  NEW LEAD
+                                </span>
+                              )}
+                              <h4 className="text-white font-bold text-sm sm:text-base line-clamp-1">{lead.name || 'Client Lead'}</h4>
+                              <span className="text-gold text-[10px] uppercase tracking-widest font-mono bg-white/5 px-2 py-0.5 border border-white/10">
+                                {lead.service || 'General Inquiry'}
+                              </span>
+                              {lead.propertyType && (
+                                <span className="text-gray-300 text-[10px] font-mono bg-white/5 px-2 py-0.5 border border-white/10">
+                                  {lead.propertyType}
+                                </span>
+                              )}
+                              {lead.budget && (
+                                <span className="text-emerald-400 text-[10px] font-mono bg-emerald-950/40 px-2 py-0.5 border border-emerald-500/30">
+                                  {lead.budget}
+                                </span>
+                              )}
+                              <span className="text-gray-400 text-[10px] font-mono ml-auto">
+                                {lead.createdAt ? new Date(lead.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recent'}
+                              </span>
+                            </div>
+
+                            {/* Contacts */}
+                            <div className="flex items-center gap-3 text-xs text-gray-300 flex-wrap my-1 font-mono">
+                              {lead.phone && (
+                                <a href={`tel:${lead.phone}`} className="hover:text-gold transition-colors flex items-center gap-1">
+                                  <Phone size={12} className="text-gold shrink-0" />
+                                  <span>{lead.phone}</span>
+                                </a>
+                              )}
+                              {lead.email && (
+                                <a href={`mailto:${lead.email}`} className="hover:text-gold transition-colors flex items-center gap-1">
+                                  <Mail size={12} className="text-gold shrink-0" />
+                                  <span>{lead.email}</span>
+                                </a>
+                              )}
+                            </div>
+
+                            {/* Details snippet */}
+                            {lead.details && (
+                              <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mt-1">
+                                <span className="text-gray-500 font-mono text-[10px] uppercase mr-1">Scope:</span>
+                                {lead.details}
+                              </p>
+                            )}
+
+                            {/* Attachment if present */}
+                            {lead.fileAttachment && (
+                              <div className="mt-2 inline-flex items-center gap-2 bg-[#141414] border border-white/10 px-2.5 py-1 text-[11px] font-mono text-gold">
+                                <FileText size={12} />
+                                <span className="text-white truncate max-w-[200px]">{lead.fileAttachment.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setLeadAttachmentModal({ ...lead.fileAttachment, clientName: lead.name })}
+                                  className="underline text-gold hover:text-white cursor-pointer ml-1"
+                                >
+                                  View
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Actions Toolbar */}
+                        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end border-t lg:border-t-0 pt-2 lg:pt-0 border-white/5">
+                          {/* Mark as Read Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleNotificationRead(lead.id)}
+                            className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all flex items-center gap-1.5 cursor-pointer border ${
+                              isUnread
+                                ? 'bg-emerald-950/80 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 font-bold shadow-sm'
+                                : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-400 hover:text-white'
+                            }`}
+                            title={isUnread ? "Mark this lead as read" : "Mark as unread"}
+                          >
+                            <CheckCircle2 size={13} className={isUnread ? "text-emerald-400" : "text-gray-500"} />
+                            <span>{isUnread ? "Mark as Read" : "Read"}</span>
+                          </button>
+
+                          {/* Send to Owner WhatsApp */}
+                          <a
+                            href={getOwnerWhatsAppUrl({
+                              id: lead.id,
+                              leadType: (lead.service && lead.service !== 'General Inquiry') ? 'Quotation Request' : 'Consultation Lead',
+                              name: lead.name,
+                              phone: lead.phone,
+                              email: lead.email,
+                              service: lead.service,
+                              details: lead.details,
+                              timestamp: lead.createdAt
+                            })}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gold hover:bg-gold-light text-black font-bold font-mono text-xs uppercase tracking-wider rounded-sm transition-all shadow-sm"
+                            title={`Send full lead summary directly to studio owner (${whatsappConfig.ownerWhatsAppNumber})`}
+                          >
+                            <MessageSquare size={13} />
+                            <span>Owner WhatsApp</span>
+                          </a>
+
+                          {/* Chat Client */}
+                          {lead.phone && (
+                            <a
+                              href={getClientWhatsAppReplyUrl(lead.phone, lead.name, lead.service)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black-pure border border-white/20 hover:border-gold text-gray-200 hover:text-white font-mono text-xs uppercase tracking-wider rounded-sm transition-all"
+                              title="Chat directly with client on WhatsApp"
+                            >
+                              <span>Reply Client</span>
+                            </a>
+                          )}
+
+                          {/* Delete Lead */}
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                if (lead.id && !lead.id.startsWith('local_')) {
+                                  try {
+                                    await deleteDoc(doc(db, 'leads', lead.id));
+                                  } catch (e) {
+                                    console.warn("Firestore delete failed:", e);
+                                  }
+                                }
+                                const currentLocal = JSON.parse(localStorage.getItem('natal_local_leads') || '[]');
+                                const updated = currentLocal.filter((l: any) => l.id !== lead.id);
+                                localStorage.setItem('natal_local_leads', JSON.stringify(updated));
+                                setLeads(prev => prev.filter(l => l.id !== lead.id));
+                              } catch (e) {
+                                console.error("Error deleting lead:", e);
+                              }
+                            }}
+                            className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-950/40 transition-colors cursor-pointer border border-transparent hover:border-red-500/30 rounded-sm"
+                            title="Delete Lead"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               ) : (
+                /* LEADS GRID FORMAT */
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
-                  {leads.map((lead, lIdx) => (
-                    <div key={lead.id ? `${lead.id}-${lIdx}` : `lead-${lIdx}`} className="bg-[#0f0f0f] border border-white/10 hover:border-gold/30 rounded-sm p-4 sm:p-5 flex flex-col justify-between transition-colors shadow-sm">
+                  {leads.map((lead, lIdx) => {
+                    const isUnread = !readNotificationIds.includes(lead.id);
+                    return (
+                    <div key={lead.id ? `${lead.id}-${lIdx}` : `lead-${lIdx}`} className={`bg-[#0f0f0f] border ${isUnread ? 'border-gold/50 shadow-md' : 'border-white/10 hover:border-gold/30'} rounded-sm p-4 sm:p-5 flex flex-col justify-between transition-colors shadow-sm`}>
                       <div>
                         <div className="flex items-start justify-between gap-2 border-b border-white/10 pb-3 mb-3">
                           <div>
-                            <h4 className="text-white font-bold text-base line-clamp-1">{lead.name || 'Client Lead'}</h4>
+                            <div className="flex items-center gap-2">
+                              {isUnread && (
+                                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" title="Unread Lead" />
+                              )}
+                              <h4 className="text-white font-bold text-base line-clamp-1">{lead.name || 'Client Lead'}</h4>
+                            </div>
                             <span className="text-gold text-[10px] uppercase tracking-widest font-mono mt-0.5 inline-block bg-white/5 px-2 py-0.5 border border-white/10">
                               {lead.service || 'General Inquiry'}
                             </span>
                           </div>
-                          <div className="flex flex-col items-end gap-2">
+                          <div className="flex items-center gap-2">
+                            {/* Mark as Read Button */}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleNotificationRead(lead.id)}
+                              className={`px-2 py-1 text-[10px] font-mono uppercase tracking-wider rounded-sm transition-all flex items-center gap-1 cursor-pointer border ${
+                                isUnread
+                                  ? 'bg-emerald-950/80 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 font-bold'
+                                  : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-400 hover:text-white'
+                              }`}
+                              title={isUnread ? "Mark lead as read" : "Mark as unread"}
+                            >
+                              <CheckCircle2 size={11} className={isUnread ? "text-emerald-400" : "text-gray-500"} />
+                              <span>{isUnread ? "Mark Read" : "Read"}</span>
+                            </button>
                             <span className="text-gray-400 text-[10px] font-mono whitespace-nowrap bg-white/5 px-1.5 py-0.5 border border-white/10">
                               {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : 'Recent'}
                             </span>
@@ -5002,7 +5713,8 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                         </div>
                       </div>
                     </div>
-                  ))}
+                  );
+                  })}
                 </div>
               )}
             </div>
@@ -5037,17 +5749,55 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
               onExportCSV={handleExportUsersCSV}
               notice={userNotice}
               onClearNotice={() => setUserNotice('')}
+              readNotificationIds={readNotificationIds}
+              onToggleNotificationRead={handleToggleNotificationRead}
             />
           )}
 
           {/* TAB 3: TESTIMONIALS */}
           {activeTab === 'testimonials' && (
             <div className="space-y-6">
-              <div className="border-b border-gold/20 pb-3">
-                <span className="text-[10px] font-mono text-gold uppercase tracking-widest">Client Feedback</span>
-                <h2 className="text-xl font-heading text-white uppercase tracking-wider">
-                  Testimonials
-                </h2>
+              <div className="border-b border-gold/20 pb-3 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-mono text-gold uppercase tracking-widest">Client Feedback</span>
+                  <h2 className="text-xl font-heading text-white uppercase tracking-wider">
+                    Testimonials
+                  </h2>
+                </div>
+                <div className="flex items-center border border-gold/30 bg-black-pure p-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTestimonialsViewFormat('grid');
+                      localStorage.setItem('natal_testimonials_view_format', 'grid');
+                    }}
+                    className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                      testimonialsViewFormat === 'grid'
+                        ? 'bg-gold text-black-pure font-bold shadow-sm'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                    title="Grid Format"
+                  >
+                    <LayoutGrid size={13} />
+                    <span>Grid</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTestimonialsViewFormat('list');
+                      localStorage.setItem('natal_testimonials_view_format', 'list');
+                    }}
+                    className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                      testimonialsViewFormat === 'list'
+                        ? 'bg-gold text-black-pure font-bold shadow-sm'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                    title="List Format"
+                  >
+                    <List size={13} />
+                    <span>List</span>
+                  </button>
+                </div>
               </div>
 
               {/* Upload New Testimonial Form */}
@@ -5175,7 +5925,55 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   <p className="text-gray-300 font-medium text-sm">No testimonials added yet.</p>
                   <p className="text-xs text-gray-500 mt-1">Client testimonials will appear here.</p>
                 </div>
+              ) : testimonialsViewFormat === 'list' ? (
+                /* TESTIMONIALS LIST FORMAT */
+                <div className="space-y-3 w-full">
+                  {testimonials.map((testimonial, tIdx) => (
+                    <div 
+                      key={testimonial.id ? `${testimonial.id}-${tIdx}` : `t-list-${tIdx}`}
+                      className="bg-[#0f0f0f] border border-white/10 hover:border-gold/30 rounded-sm p-4 sm:p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 transition-colors shadow-sm"
+                    >
+                      <div className="flex items-start sm:items-center gap-4 min-w-0 flex-1">
+                        {testimonial.image ? (
+                          <div className="w-12 h-12 rounded-full border border-gold/50 p-0.5 bg-black-rich flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                            <img src={testimonial.image} alt={testimonial.name} className="w-full h-full rounded-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className="w-12 h-12 rounded-full border border-gold/30 bg-gold/10 text-gold font-bold flex items-center justify-center shrink-0">
+                            {testimonial.name?.[0]?.toUpperCase() || 'C'}
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <h4 className="text-white font-bold text-base">{testimonial.name}</h4>
+                            <span className="text-gold text-xs font-mono">{testimonial.role}</span>
+                            <span className="text-xs font-mono text-yellow-400 bg-yellow-500/10 px-2 py-0.5 border border-yellow-500/20 rounded">
+                              {testimonial.rating} ★
+                            </span>
+                          </div>
+                          {testimonial.content && (
+                            <p className="text-gray-300 text-xs italic mt-1 font-light leading-relaxed line-clamp-2">
+                              "{testimonial.content}"
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto border-t sm:border-t-0 pt-2 sm:pt-0 border-white/5">
+                        <button 
+                          onClick={() => handleDeleteTestimonial(testimonial.id)}
+                          className="px-3 py-1.5 rounded bg-red-950/40 text-red-400 border border-red-500/30 flex items-center gap-1.5 hover:bg-red-900/60 hover:text-red-200 transition-colors cursor-pointer text-xs font-mono"
+                          title="Delete Testimonial"
+                        >
+                          <Trash2 size={13} />
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : (
+                /* TESTIMONIALS GRID FORMAT */
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                   {testimonials.map((testimonial, tIdx) => (
                     <div key={testimonial.id ? `${testimonial.id}-${tIdx}` : `testimonial-${tIdx}`} className="bg-[#0f0f0f] border border-white/10 hover:border-gold/30 rounded-sm p-4 sm:p-5 space-y-3 relative group transition-colors shadow-sm flex flex-col justify-between">
@@ -5220,11 +6018,47 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
           {/* TAB 4: TRANSFORMATIONS */}
           {activeTab === 'transformations' && (
             <div className="space-y-6">
-              <div className="border-b border-gold/20 pb-3">
-                <span className="text-[10px] font-mono text-gold uppercase tracking-widest">Project Transformations</span>
-                <h2 className="text-xl font-heading text-white uppercase tracking-wider">
-                  Before & After
-                </h2>
+              <div className="border-b border-gold/20 pb-3 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-mono text-gold uppercase tracking-widest">Project Transformations</span>
+                  <h2 className="text-xl font-heading text-white uppercase tracking-wider">
+                    Before & After
+                  </h2>
+                </div>
+                <div className="flex items-center border border-gold/30 bg-black-pure p-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTransformationsViewFormat('grid');
+                      localStorage.setItem('natal_transformations_view_format', 'grid');
+                    }}
+                    className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                      transformationsViewFormat === 'grid'
+                        ? 'bg-gold text-black-pure font-bold shadow-sm'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                    title="Grid Format"
+                  >
+                    <LayoutGrid size={13} />
+                    <span>Grid</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTransformationsViewFormat('list');
+                      localStorage.setItem('natal_transformations_view_format', 'list');
+                    }}
+                    className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                      transformationsViewFormat === 'list'
+                        ? 'bg-gold text-black-pure font-bold shadow-sm'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                    title="List Format"
+                  >
+                    <List size={13} />
+                    <span>List</span>
+                  </button>
+                </div>
               </div>
 
               {/* Upload New Transformation Form */}
@@ -5330,7 +6164,65 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   <p className="text-gray-300 font-medium text-sm">No transformations added yet.</p>
                   <p className="text-xs text-gray-500 mt-1">Before & After slider items will appear here.</p>
                 </div>
+              ) : transformationsViewFormat === 'list' ? (
+                /* TRANSFORMATIONS LIST FORMAT */
+                <div className="space-y-3 w-full">
+                  {transformations.map((tr, trIdx) => (
+                    <div 
+                      key={tr.id ? `${tr.id}-${trIdx}` : `tr-list-${trIdx}`}
+                      className="bg-black-pure border border-white/10 hover:border-gold/40 p-3 sm:p-4 rounded-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 transition-all shadow-sm"
+                    >
+                      <div className="flex items-start sm:items-center gap-4 min-w-0 flex-1">
+                        {/* Side by side mini previews */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="w-16 h-14 sm:w-20 sm:h-16 relative border border-white/10 bg-black-rich overflow-hidden">
+                            <span className="absolute top-0.5 left-0.5 bg-black/90 text-white text-[8px] font-mono px-1">Before</span>
+                            <img src={tr.beforeImage} alt="Before" className={`w-full h-full ${tr.fitMode === 'cover' ? 'object-cover' : 'object-contain'}`} />
+                          </div>
+                          <span className="text-gold text-xs font-mono">&rarr;</span>
+                          <div className="w-16 h-14 sm:w-20 sm:h-16 relative border border-gold/30 bg-black-rich overflow-hidden">
+                            <span className="absolute top-0.5 left-0.5 bg-gold/90 text-black text-[8px] font-mono font-bold px-1">After</span>
+                            <img src={tr.afterImage} alt="After" className={`w-full h-full ${tr.fitMode === 'cover' ? 'object-cover' : 'object-contain'}`} />
+                          </div>
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-white font-heading font-bold text-sm sm:text-base uppercase tracking-wider truncate" title={tr.title}>
+                            {tr.title}
+                          </h4>
+                          <span className="text-[10px] font-mono text-gray-400 mt-0.5 inline-block">
+                            Display Mode: <strong className="text-gold font-normal">{tr.fitMode === 'contain' ? 'Fit (Contain)' : 'Fill (Cover)'}</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto border-t sm:border-t-0 pt-2 sm:pt-0 border-white/5">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleTrMode(tr.id, tr.fitMode)}
+                          className={`px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider rounded border transition-colors cursor-pointer ${
+                            tr.fitMode === 'contain'
+                              ? 'bg-blue-500/15 text-blue-300 border-blue-500/40 hover:bg-blue-500/25'
+                              : 'bg-gold/15 text-gold border-gold/40 hover:bg-gold/25'
+                          }`}
+                          title="Toggle Fit/Fill mode"
+                        >
+                          {tr.fitMode === 'contain' ? 'Switch to Fill' : 'Switch to Fit'}
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteTransformation(tr.id)}
+                          className="px-2.5 py-1.5 rounded bg-red-950/50 text-red-400 hover:bg-red-900/70 hover:text-red-200 transition-colors cursor-pointer border border-red-500/30 text-xs font-mono flex items-center gap-1"
+                          title="Delete Transformation"
+                        >
+                          <Trash2 size={12} />
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : (
+                /* TRANSFORMATIONS GRID FORMAT */
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 w-full">
                   {transformations.map((tr, trIdx) => (
                     <div key={tr.id ? `${tr.id}-${trIdx}` : `tr-${trIdx}`} className="bg-black-pure border border-gold/30 hover:border-gold p-2.5 sm:p-3 space-y-2.5 relative group shadow-md hover:shadow-[0_12px_28px_rgba(0,0,0,0.85)] transition-all w-full flex flex-col justify-between">
@@ -5458,30 +6350,99 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
               });
             });
 
-            // Deduplicate by ID
-            const seenIds = new Set<string>();
-            const uniqueAlerts: any[] = [];
-            for (const item of allAlerts) {
-              if (!seenIds.has(item.id)) {
-                seenIds.add(item.id);
-                uniqueAlerts.push(item);
+            // 4. Real-time Website Activities (Quotations, Contacts, Specs Inquiries, WhatsApp Clicks, Calls, Registrations)
+            userActivities.forEach((act: any, idx: number) => {
+              const id = act.id || `act_${act.timestamp || idx}`;
+              const isUnread = !readNotificationIds.includes(id);
+              const actTime = parseTimestampToMs(act.timestamp || act.createdAt) || (Date.now() - (idx * 60000));
+
+              let typeLabel = 'Website Activity';
+              let badge = 'User Interaction';
+              let targetTab: AdminTabType = 'leads';
+
+              if (act.type === 'quotation') {
+                typeLabel = 'Quotation Request';
+                badge = act.metadata?.service || 'Instant Quote Request';
+                targetTab = 'leads';
+              } else if (act.type === 'contact') {
+                typeLabel = 'Contact Consultation';
+                badge = 'Direct Form Inquiry';
+                targetTab = 'leads';
+              } else if (act.type === 'specs_inquiry') {
+                typeLabel = 'Specs Consultation';
+                badge = act.metadata?.projectTitle || 'Detailed Specs Inquiry';
+                targetTab = 'leads';
+              } else if (act.type === 'whatsapp') {
+                typeLabel = 'WhatsApp Chat';
+                badge = 'Direct Chat Click';
+                targetTab = 'communications';
+              } else if (act.type === 'call') {
+                typeLabel = 'Phone Call Click';
+                badge = 'Direct Call Initiated';
+                targetTab = 'leads';
+              } else if (act.type === 'registration') {
+                typeLabel = 'VIP Registration';
+                badge = 'Account Created';
+                targetTab = 'users';
+              } else if (act.type === 'review') {
+                typeLabel = 'Client Review';
+                badge = 'Testimonial Submitted';
+                targetTab = 'testimonials';
+              } else {
+                typeLabel = act.title || 'Client Action';
+                badge = act.type || 'Interaction';
               }
+
+              const clientPhone = act.userPhone || act.metadata?.phone || '';
+              const clientEmail = act.userEmail || act.metadata?.email || '';
+              const clientName = act.userName || act.metadata?.name || 'Website Visitor';
+
+              allAlerts.push({
+                id,
+                category: 'activity',
+                typeLabel,
+                title: act.title || `${typeLabel}: ${clientName}`,
+                badge: act.metadata?.service || badge,
+                details: act.description || 'User performed an interaction on the website.',
+                email: clientEmail,
+                phone: clientPhone,
+                service: act.metadata?.service || '',
+                source: act.metadata?.source || `Website (${act.type})`,
+                directWhatsAppUrl: clientPhone ? `https://wa.me/${clientPhone.replace(/\D/g, '').replace(/^0/, '256')}` : '',
+                timestamp: actTime,
+                isUnread,
+                targetTab,
+                activityType: act.type
+              });
+            });
+
+            // Deduplicate: merge items that share identical ID or same lead signature within 20 seconds
+            const seenIds = new Set<string>();
+            const seenSignatures = new Set<string>();
+            const uniqueAlerts: any[] = [];
+
+            for (const item of allAlerts) {
+              if (seenIds.has(item.id)) continue;
+              seenIds.add(item.id);
+
+              const timeBucket = Math.floor((item.timestamp || 0) / 20000);
+              const signature = `${(item.typeLabel || '').toLowerCase()}_${(item.email || '').toLowerCase()}_${(item.phone || '').replace(/\D/g, '')}_${timeBucket}`;
+              if ((item.email || item.phone) && seenSignatures.has(signature)) {
+                continue;
+              }
+              if (item.email || item.phone) {
+                seenSignatures.add(signature);
+              }
+              uniqueAlerts.push(item);
             }
 
-            // Sort notifications: Prioritize new user registrations at the top of the list!
+            // CRITICAL: Sort so UNREAD notifications come first, and NEWEST activity STRICTLY at the top!
             uniqueAlerts.sort((a, b) => {
-              const isUserA = a.category === 'user';
-              const isUserB = b.category === 'user';
-
-              // 1. New users are placed at the top of the notifications list
-              if (isUserA && !isUserB) return -1;
-              if (!isUserA && isUserB) return 1;
-
-              // 2. Unread alerts first
+              // 1. Unread notifications appear before read ones
               if (a.isUnread && !b.isUnread) return -1;
               if (!a.isUnread && b.isUnread) return 1;
 
-              // 3. Newest timestamp first
+              // 2. Newest timestamp strictly sits at the top (descending)
               const timeA = typeof a.timestamp === 'number' ? a.timestamp : 0;
               const timeB = typeof b.timestamp === 'number' ? b.timestamp : 0;
               return timeB - timeA;
@@ -5490,6 +6451,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
             // Filter
             const filteredList = uniqueAlerts.filter(item => {
               if (notificationFilter === 'unread' && !item.isUnread) return false;
+              if (notificationFilter === 'activities' && item.category !== 'activity') return false;
               if (notificationFilter === 'leads' && item.category !== 'lead') return false;
               if (notificationFilter === 'users' && item.category !== 'user') return false;
               if (notificationFilter === 'whatsapp' && item.category !== 'whatsapp') return false;
@@ -5509,6 +6471,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
             });
 
             const unreadCountInList = uniqueAlerts.filter(a => a.isUnread).length;
+            const activitiesCountInList = uniqueAlerts.filter(a => a.category === 'activity').length;
             const leadsCountInList = uniqueAlerts.filter(a => a.category === 'lead').length;
             const usersCountInList = uniqueAlerts.filter(a => a.category === 'user').length;
             const waCountInList = uniqueAlerts.filter(a => a.category === 'whatsapp').length;
@@ -5561,6 +6524,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                       summaryCards={[
                         { label: 'Total Alerts', value: uniqueAlerts.length },
                         { label: 'Unread', value: unreadNotificationsCount },
+                        { label: 'Activities', value: activitiesCountInList },
                         { label: 'Leads', value: leadsCountInList },
                         { label: 'WhatsApp', value: waCountInList }
                       ]}
@@ -5735,6 +6699,21 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     </button>
 
                     <button
+                      onClick={() => setNotificationFilter('activities')}
+                      className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                        notificationFilter === 'activities'
+                          ? 'bg-gold text-black-pure font-bold shadow-sm'
+                          : 'bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5'
+                      }`}
+                    >
+                      <Zap size={12} className={notificationFilter === 'activities' ? 'text-black-pure' : 'text-yellow-400'} />
+                      <span>Activities</span>
+                      <span className="w-5 h-5 min-w-[20px] min-h-[20px] aspect-square rounded-full text-[10px] font-mono font-bold flex items-center justify-center p-0 leading-none bg-red-600 text-white shadow-sm shrink-0 border-0 outline-none ring-0">
+                        {activitiesCountInList}
+                      </span>
+                    </button>
+
+                    <button
                       onClick={() => setNotificationFilter('leads')}
                       className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
                         notificationFilter === 'leads'
@@ -5798,19 +6777,58 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
 
                 {/* Main Notification Feed List */}
                 <div className="bg-[#0f0f0f] border border-white/10 p-4 sm:p-6 lg:p-7 rounded-sm shadow-sm space-y-3">
-                  <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-white/10 gap-3">
                     <div className="flex items-center gap-2">
                       <Sparkles size={16} className="text-gold" />
                       <h3 className="text-sm font-heading uppercase tracking-widest text-gold font-bold">
                         Activity Stream ({filteredList.length})
                       </h3>
                     </div>
-                    {unreadCountInList > 0 && (
-                      <span className="text-xs font-mono text-red-400 flex items-center gap-1.5 px-2.5 py-0.5 bg-red-600/15 border border-red-500/40 rounded-full">
-                        <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-                        <span>{unreadCountInList} Unread Notification{unreadCountInList !== 1 ? 's' : ''}</span>
-                      </span>
-                    )}
+
+                    <div className="flex items-center gap-3 self-end sm:self-auto flex-wrap">
+                      {/* Grid vs List View Mode Toggle */}
+                      <div className="flex items-center border border-gold/30 bg-black-pure p-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNotificationsViewFormat('list');
+                            localStorage.setItem('natal_notifications_view_format', 'list');
+                          }}
+                          className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                            notificationsViewFormat === 'list'
+                              ? 'bg-gold text-black-pure font-bold shadow-sm'
+                              : 'text-gray-400 hover:text-white'
+                          }`}
+                          title="List Format (Compact Rows)"
+                        >
+                          <List size={13} />
+                          <span>List</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNotificationsViewFormat('grid');
+                            localStorage.setItem('natal_notifications_view_format', 'grid');
+                          }}
+                          className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                            notificationsViewFormat === 'grid'
+                              ? 'bg-gold text-black-pure font-bold shadow-sm'
+                              : 'text-gray-400 hover:text-white'
+                          }`}
+                          title="Grid Format (2 Columns)"
+                        >
+                          <LayoutGrid size={13} />
+                          <span>Grid</span>
+                        </button>
+                      </div>
+
+                      {unreadCountInList > 0 && (
+                        <span className="text-xs font-mono text-red-400 flex items-center gap-1.5 px-2.5 py-1 bg-red-600/15 border border-red-500/40 rounded-full font-semibold">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                          <span>{unreadCountInList} Unread Notification{unreadCountInList !== 1 ? 's' : ''}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {filteredList.length === 0 ? (
@@ -5824,7 +6842,172 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                         Reset Filters
                       </button>
                     </div>
+                  ) : notificationsViewFormat === 'list' ? (
+                    /* NOTIFICATIONS LIST FORMAT */
+                    <div className="space-y-3 w-full">
+                      {filteredList.map((item) => {
+                        const isUnread = item.isUnread;
+                        return (
+                          <div 
+                            key={item.id}
+                            className={`p-4 sm:p-5 rounded-sm border transition-all duration-200 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 ${
+                              isUnread 
+                                ? 'border-gold/50 bg-[#141414] shadow-md hover:border-gold/70' 
+                                : 'border-white/10 bg-[#0f0f0f] hover:border-white/20 hover:bg-[#141414]'
+                            }`}
+                          >
+                            <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
+                              {/* Category Icon Badge with Unread Dot */}
+                              <div className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center border mt-0.5 sm:mt-0 bg-white/5 border-white/10 text-gold relative">
+                                {item.category === 'lead' && <Mail size={16} />}
+                                {item.category === 'user' && <UserCheck size={16} />}
+                                {item.category === 'whatsapp' && <MessageSquare size={16} />}
+                                {item.category === 'activity' && <Zap size={16} className="text-yellow-400" />}
+                                {item.category === 'system' && <Sparkles size={16} />}
+                                {isUnread && (
+                                  <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-red-500 border-2 border-black-pure animate-pulse" title="Unread alert" />
+                                )}
+                              </div>
+
+                              <div className="min-w-0 flex-1 space-y-1">
+                                {/* Title & Badges */}
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="text-sm sm:text-base font-semibold text-white tracking-wide truncate">
+                                    {item.title}
+                                  </h4>
+                                  {item.category === 'user' && (
+                                    <span className="text-[9px] font-mono px-2 py-0.5 bg-white/5 text-gold border border-gold/30 font-bold rounded tracking-wider shadow-sm flex items-center gap-1">
+                                      <Sparkles size={9} /> NEW USER
+                                    </span>
+                                  )}
+                                  {item.category === 'activity' && (
+                                    <span className="text-[9px] font-mono px-2 py-0.5 bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 font-bold rounded tracking-wider shadow-sm flex items-center gap-1">
+                                      <Zap size={9} /> {isUnread ? 'NEW ACTIVITY' : 'ACTIVITY'}
+                                    </span>
+                                  )}
+                                  {isUnread && item.category !== 'user' && item.category !== 'activity' && (
+                                    <span className="text-[9px] font-mono px-2 py-0.5 bg-red-600/20 text-red-400 border border-red-500/30 font-bold rounded tracking-wider shadow-sm">
+                                      NEW
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded border bg-white/5 text-gray-300 border-white/10">
+                                    {item.typeLabel}
+                                  </span>
+                                  {item.service && (
+                                    <span className="text-[10px] font-mono px-2 py-0.5 bg-white/5 text-gray-300 border border-white/10 rounded truncate max-w-[200px] sm:max-w-[280px]">
+                                      {item.service}
+                                    </span>
+                                  )}
+                                  <span className="text-gray-500 font-mono text-[10px] ml-auto">
+                                    {new Date(item.timestamp).toLocaleString(undefined, {
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    })}
+                                  </span>
+                                </div>
+
+                                {/* Details / Message */}
+                                {item.details && (
+                                  <p className="text-xs text-gray-300 font-sans leading-relaxed line-clamp-2">
+                                    {item.details}
+                                  </p>
+                                )}
+
+                                {/* Metadata: Email, Phone, Source */}
+                                <div className="flex items-center gap-3 text-[11px] text-gray-400 flex-wrap pt-0.5 font-mono">
+                                  {item.email && (
+                                    <a href={`mailto:${item.email}`} className="flex items-center gap-1 text-gray-300 hover:text-gold transition-colors">
+                                      <Mail size={11} className="text-gray-500" />
+                                      <span>{item.email}</span>
+                                    </a>
+                                  )}
+                                  {item.phone && (
+                                    <a href={`tel:${item.phone}`} className="flex items-center gap-1 text-gray-300 hover:text-gold transition-colors">
+                                      <Phone size={11} className="text-gray-500" />
+                                      <span>{item.phone}</span>
+                                    </a>
+                                  )}
+                                  {item.source && (
+                                    <span className="text-gray-400">
+                                      Source: <strong className="text-gray-300 font-normal">{item.source}</strong>
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Actions Toolbar */}
+                            <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end border-t lg:border-t-0 pt-2 lg:pt-0 border-white/5">
+                              {/* Mark as Read / Mark Unread Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleNotificationRead(item.id)}
+                                className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all flex items-center gap-1.5 cursor-pointer border ${
+                                  isUnread
+                                    ? 'bg-emerald-950/80 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 font-bold shadow-sm'
+                                    : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-400 hover:text-white'
+                                }`}
+                                title={isUnread ? 'Mark this notification as read' : 'Mark as unread'}
+                              >
+                                <CheckCircle2 size={13} className={isUnread ? 'text-emerald-400' : 'text-gray-500'} />
+                                <span>{isUnread ? 'Mark Read' : 'Read'}</span>
+                              </button>
+
+                              {/* Send to Owner WhatsApp */}
+                              <a
+                                href={getOwnerWhatsAppUrl({
+                                  id: item.id,
+                                  leadType: item.typeLabel || 'Database Notification',
+                                  name: item.title,
+                                  phone: item.phone,
+                                  email: item.email,
+                                  service: item.service,
+                                  details: item.details,
+                                  timestamp: item.timestamp
+                                })}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider bg-gold hover:bg-gold-light text-black font-bold rounded-sm transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                                title={`Send this alert to Studio Owner WhatsApp (${whatsappConfig.ownerWhatsAppNumber})`}
+                              >
+                                <MessageSquare size={12} />
+                                <span>Owner WhatsApp</span>
+                              </a>
+
+                              {/* Reply to Client via WhatsApp if phone exists */}
+                              {item.phone && (
+                                <a
+                                  href={getClientWhatsAppReplyUrl(item.phone, item.title, item.service)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider bg-black-pure hover:bg-white/10 border border-white/20 text-gray-200 hover:text-white rounded-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                                  title="Reply directly to client on WhatsApp"
+                                >
+                                  <span>Reply</span>
+                                </a>
+                              )}
+
+                              {/* Jump to Target Dashboard Tab */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleMarkSingleNotificationRead(item.id);
+                                  switchTab(item.targetTab);
+                                }}
+                                className="px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-gold/10 hover:bg-gold/25 border border-gold/30 text-gold hover:text-white rounded-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                                title={`Open item in ${item.targetTab} tab`}
+                              >
+                                <span>Open in {item.targetTab === 'leads' ? 'CRM' : item.targetTab === 'users' ? 'Users' : item.targetTab === 'communications' ? 'Comms' : 'Details'} &rarr;</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : (
+                    /* NOTIFICATIONS GRID FORMAT */
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {filteredList.map((item) => {
                         const isUnread = item.isUnread;
@@ -5845,6 +7028,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                                   {item.category === 'lead' && <Mail size={15} />}
                                   {item.category === 'user' && <UserCheck size={15} />}
                                   {item.category === 'whatsapp' && <MessageSquare size={15} />}
+                                  {item.category === 'activity' && <Zap size={15} className="text-yellow-400" />}
                                   {item.category === 'system' && <Sparkles size={15} />}
                                 </div>
 
@@ -5852,7 +7036,7 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                                   {/* Title & Badges */}
                                   <div className="flex items-center gap-2 flex-wrap">
                                     {isUnread && (
-                                      <span className="w-1.5 h-1.5 rounded-full bg-gold shrink-0" title="Unread alert" />
+                                      <span className="w-1.5 h-1.5 rounded-full bg-gold shrink-0 animate-pulse" title="Unread alert" />
                                     )}
                                     <h4 className="text-sm font-semibold text-white tracking-wide truncate">
                                       {item.title}
@@ -5862,7 +7046,12 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                                         <Sparkles size={9} /> NEW USER
                                       </span>
                                     )}
-                                    {isUnread && item.category !== 'user' && (
+                                    {item.category === 'activity' && (
+                                      <span className="text-[9px] font-mono px-2 py-0.5 bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 font-bold rounded tracking-wider shadow-sm flex items-center gap-1">
+                                        <Zap size={9} /> {isUnread ? 'NEW ACTIVITY' : 'ACTIVITY'}
+                                      </span>
+                                    )}
+                                    {isUnread && item.category !== 'user' && item.category !== 'activity' && (
                                       <span className="text-[9px] font-mono px-2 py-0.5 bg-white/5 text-red-400 border border-red-500/30 font-bold rounded tracking-wider shadow-sm">
                                         NEW
                                       </span>
@@ -5917,6 +7106,21 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
 
                               {/* Bottom Actions Bar (View in Tab, WhatsApp, Mark Read/Unread) */}
                               <div className="flex items-center gap-2 shrink-0 flex-wrap pt-3 border-t border-white/5 w-full justify-end">
+                                {/* Toggle Read / Unread Status */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleNotificationRead(item.id)}
+                                  className={`px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider rounded-sm transition-all cursor-pointer flex items-center gap-1.5 border ${
+                                    isUnread
+                                      ? 'bg-emerald-950/80 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 font-bold'
+                                      : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-white/10'
+                                  }`}
+                                  title={isUnread ? 'Mark this notification as read' : 'Mark as unread'}
+                                >
+                                  <CheckCircle2 size={12} className={isUnread ? 'text-emerald-400' : 'text-gray-500'} />
+                                  <span>{isUnread ? 'Mark Read' : 'Read'}</span>
+                                </button>
+
                                 {/* Send to Owner WhatsApp */}
                                 <a
                                   href={getOwnerWhatsAppUrl({
@@ -5962,16 +7166,6 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                                   title={`Open item in ${item.targetTab} tab`}
                                 >
                                   <span>Open in {item.targetTab === 'leads' ? 'CRM' : item.targetTab === 'users' ? 'Users' : item.targetTab === 'communications' ? 'Comms' : 'Details'} &rarr;</span>
-                                </button>
-
-                                {/* Toggle Read / Unread Status */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleNotificationRead(item.id)}
-                                  className="px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 rounded-sm transition-all cursor-pointer"
-                                  title={isUnread ? 'Mark this notification as read' : 'Mark as unread'}
-                                >
-                                  {isUnread ? 'Mark Read' : 'Mark Unread'}
                                 </button>
                               </div>
                             </div>
@@ -6159,21 +7353,87 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   </form>
 
                   {/* Real-time Status Card */}
-                  <div className="p-3 bg-black-rich border border-white/10 space-y-1.5 text-xs font-mono">
+                  <div className="p-3 bg-black-rich border border-white/10 space-y-2 text-xs font-mono">
                     <div className="flex items-center justify-between">
                       <span className="text-gray-400">Current Destination:</span>
                       <span className="text-white font-semibold">{emailConfig.recipientEmail}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-gray-400">Watched Collections:</span>
-                      <span className="text-gold font-semibold">mail &bull; leads</span>
+                      <span className="text-gold font-semibold">mail &bull; leads &bull; user_activities</span>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                      <span className="text-gray-400">Gateway Status:</span>
+                      <button
+                        type="button"
+                        onClick={handleCheckEmailStatus}
+                        disabled={emailStatusResult?.loading}
+                        className="text-[10px] text-gold hover:text-white bg-gold/15 hover:bg-gold/30 px-2.5 py-1 border border-gold/40 rounded transition-all cursor-pointer flex items-center gap-1.5"
+                      >
+                        {emailStatusResult?.loading ? (
+                          <>
+                            <Loader2 size={11} className="animate-spin" />
+                            <span>Verifying...</span>
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw size={11} />
+                            <span>Check Activation Status</span>
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
 
+                  {emailStatusResult && (
+                    <div className={`p-3 rounded-sm text-xs border ${
+                      emailStatusResult.isActivated
+                        ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-200'
+                        : 'bg-amber-950/80 border-amber-500/50 text-amber-200'
+                    }`}>
+                      <div className="flex items-start gap-2.5">
+                        {emailStatusResult.isActivated ? (
+                          <CheckCircle size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertCircle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                        )}
+                        <div className="space-y-1.5 flex-1">
+                          <p className="font-semibold text-white">
+                            {emailStatusResult.isActivated ? 'Email Gateway Active & Verified' : 'Action Needed: Click "Activate Form" in Your Inbox'}
+                          </p>
+                          <p className="text-[11px] leading-relaxed">
+                            {emailStatusResult.message}
+                          </p>
+                          {!emailStatusResult.isActivated && (
+                            <div className="pt-1 flex flex-wrap gap-2">
+                              <a
+                                href="https://mail.google.com/mail/u/0/#search/Activate+Form"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 px-2.5 py-1 text-[11px] font-mono rounded transition-colors"
+                              >
+                                <span>Open Gmail Inbox</span>
+                                <ExternalLink size={12} />
+                              </a>
+                              <button
+                                type="button"
+                                onClick={handleCheckEmailStatus}
+                                className="inline-flex items-center gap-1 bg-white/10 hover:bg-white/20 text-white px-2.5 py-1 text-[11px] font-mono rounded transition-colors cursor-pointer"
+                              >
+                                <RefreshCw size={11} />
+                                <span>Re-check Activation</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {mailNotice && (
-                    <div className="p-3 bg-emerald-950/80 border border-emerald-500/60 text-emerald-200 text-xs flex items-center gap-2">
-                      <CheckCircle size={15} className="text-emerald-400 shrink-0" />
-                      <span>{mailNotice}</span>
+                    <div className="p-3 bg-black-rich border border-gold/40 text-gray-200 text-xs flex items-start gap-2.5">
+                      <CheckCircle size={15} className="text-gold shrink-0 mt-0.5" />
+                      <span className="leading-relaxed flex-1">{mailNotice}</span>
                     </div>
                   )}
 
@@ -6564,6 +7824,61 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                     </h3>
                   </div>
                   <div className="flex items-center gap-3 flex-wrap">
+                    {/* Mark All Dispatches as Read Button */}
+                    {whatsappDispatches.filter(r => !readNotificationIds.includes(r.id)).length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const idsToMark = whatsappDispatches.map(d => d.id).filter(id => !readNotificationIds.includes(id));
+                          if (idsToMark.length === 0) return;
+                          const updated = Array.from(new Set([...readNotificationIds, ...idsToMark]));
+                          setReadNotificationIds(updated);
+                          localStorage.setItem('natal_read_notification_ids', JSON.stringify(updated));
+                        }}
+                        className="px-3 py-1.5 bg-gold/15 hover:bg-gold/25 border border-gold/40 text-gold hover:text-white text-xs font-mono uppercase tracking-wider rounded-sm transition-all cursor-pointer flex items-center gap-1.5 shadow-sm font-semibold"
+                        title="Mark all activity dispatches as read"
+                      >
+                        <Check size={12} />
+                        <span>Mark All as Read ({whatsappDispatches.filter(r => !readNotificationIds.includes(r.id)).length})</span>
+                      </button>
+                    )}
+
+                    {/* Grid vs List View Format Toggle */}
+                    <div className="flex items-center border border-gold/30 bg-black-pure p-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCommsViewFormat('list');
+                          localStorage.setItem('natal_comms_view_format', 'list');
+                        }}
+                        className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                          commsViewFormat === 'list'
+                            ? 'bg-gold text-black-pure font-bold shadow-sm'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                        title="List / Table Format"
+                      >
+                        <List size={13} />
+                        <span>List</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCommsViewFormat('grid');
+                          localStorage.setItem('natal_comms_view_format', 'grid');
+                        }}
+                        className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                          commsViewFormat === 'grid'
+                            ? 'bg-gold text-black-pure font-bold shadow-sm'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                        title="Grid Format (Cards)"
+                      >
+                        <LayoutGrid size={13} />
+                        <span>Grid</span>
+                      </button>
+                    </div>
+
                     <ExportButton
                       data={whatsappDispatches}
                       columns={[
@@ -6601,7 +7916,8 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   <div className="py-8 text-center text-gray-500 text-xs font-mono border border-white/5 bg-black-rich">
                     No dispatches recorded yet. Click "Send Test WhatsApp Alert" above or submit a quotation to test live.
                   </div>
-                ) : (
+                ) : commsViewFormat === 'list' ? (
+                  /* COMMUNICATIONS LIST / TABLE FORMAT */
                   <div className="overflow-x-auto border border-white/10">
                     <table className="w-full text-left text-xs">
                       <thead className="bg-black-rich border-b border-white/10 text-gray-400 font-mono text-[10px] uppercase tracking-wider">
@@ -6612,76 +7928,222 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                           <th className="py-2.5 px-3">Service / Brief</th>
                           <th className="py-2.5 px-3">Status</th>
                           <th className="py-2.5 px-3">Timestamp</th>
-                          <th className="py-2.5 px-3 text-right">Action</th>
+                          <th className="py-2.5 px-3 text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5 font-mono">
-                        {whatsappDispatches.map((record) => (
-                          <tr key={record.id} className="hover:bg-white/5 transition-colors">
-                            <td className="py-2.5 px-3">
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gold/15 text-gold border border-gold/30">
-                                {record.activityType}
+                        {whatsappDispatches.map((record) => {
+                          const isUnread = !readNotificationIds.includes(record.id);
+                          return (
+                            <tr 
+                              key={record.id} 
+                              className={`transition-colors ${isUnread ? 'bg-gold/[0.04] hover:bg-gold/[0.08]' : 'hover:bg-white/5'}`}
+                            >
+                              <td className="py-2.5 px-3">
+                                <div className="flex items-center gap-1.5">
+                                  {isUnread && (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-gold shrink-0 animate-pulse" title="Unread activity" />
+                                  )}
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gold/15 text-gold border border-gold/30">
+                                    {record.activityType}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3 font-semibold text-white">
+                                {record.clientName || 'Visitor'}
+                              </td>
+                              <td className="py-2.5 px-3 text-gray-300 text-[11px]">
+                                <div>{record.clientPhone || 'No phone'}</div>
+                                <div className="text-gray-500 text-[10px]">{record.clientEmail || ''}</div>
+                              </td>
+                              <td className="py-2.5 px-3 text-gray-300 text-[11px] max-w-xs truncate">
+                                {record.service || record.details || 'General Inquiry'}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                {record.status === 'delivered_via_callmebot' ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-500/40">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                    <span>Delivered</span>
+                                  </span>
+                                ) : record.status === 'callmebot_key_invalid' ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-amber-950 text-amber-300 border border-amber-500/40" title="CallMeBot rejected API key - Tap Send to send directly">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                                    <span>Invalid Key</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-blue-950 text-blue-300 border border-blue-500/40">
+                                    <span>1-Click Ready</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-gray-400 text-[10px]">
+                                {new Date(record.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                              <td className="py-2.5 px-3 text-right">
+                                <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                  {/* Mark as Read / Read Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleNotificationRead(record.id)}
+                                    className={`inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider rounded-sm transition-colors border cursor-pointer ${
+                                      isUnread
+                                        ? 'bg-emerald-950/80 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 font-bold'
+                                        : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border-white/10'
+                                    }`}
+                                    title={isUnread ? 'Mark this activity as read' : 'Mark as unread'}
+                                  >
+                                    <CheckCircle2 size={11} className={isUnread ? 'text-emerald-400' : 'text-gray-500'} />
+                                    <span>{isUnread ? 'Mark Read' : 'Read'}</span>
+                                  </button>
+
+                                  <a
+                                    href={record.directWhatsAppUrl || getOwnerWhatsAppUrl(record)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] uppercase rounded transition-colors shadow-sm"
+                                    title={`Open formatted executive alert in WhatsApp for owner (${whatsappConfig.ownerWhatsAppNumber})`}
+                                  >
+                                    <MessageSquare size={11} />
+                                    <span>Send to WhatsApp</span>
+                                  </a>
+                                  {record.clientPhone && (
+                                    <a
+                                      href={getClientWhatsAppReplyUrl(record.clientPhone, record.clientName, record.service)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-black-pure border border-emerald-500/40 hover:bg-emerald-950 text-emerald-300 font-bold text-[10px] uppercase rounded transition-colors"
+                                      title="Chat directly with client on WhatsApp"
+                                    >
+                                      <span>Reply Client</span>
+                                    </a>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  /* COMMUNICATIONS GRID FORMAT (Cards) */
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {whatsappDispatches.map((record) => {
+                      const isUnread = !readNotificationIds.includes(record.id);
+                      return (
+                        <div
+                          key={record.id}
+                          className={`p-4 rounded-sm border transition-all duration-200 flex flex-col justify-between ${
+                            isUnread
+                              ? 'border-gold/40 bg-[#141414] shadow-sm hover:border-gold/60'
+                              : 'border-white/10 bg-[#0f0f0f] hover:border-white/20 hover:bg-[#141414]'
+                          }`}
+                        >
+                          <div className="space-y-3">
+                            {/* Card Top: Type, Pulse Dot, Status & Time */}
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5">
+                                {isUnread && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-gold shrink-0 animate-pulse" title="Unread activity" />
+                                )}
+                                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-gold/15 text-gold border border-gold/30">
+                                  {record.activityType}
+                                </span>
+                              </div>
+                              <span className="text-gray-400 font-mono text-[10px]">
+                                {new Date(record.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </span>
-                            </td>
-                            <td className="py-2.5 px-3 font-semibold text-white">
-                              {record.clientName || 'Visitor'}
-                            </td>
-                            <td className="py-2.5 px-3 text-gray-300 text-[11px]">
-                              <div>{record.clientPhone || 'No phone'}</div>
-                              <div className="text-gray-500 text-[10px]">{record.clientEmail || ''}</div>
-                            </td>
-                            <td className="py-2.5 px-3 text-gray-300 text-[11px] max-w-xs truncate">
-                              {record.service || record.details || 'General Inquiry'}
-                            </td>
-                            <td className="py-2.5 px-3">
+                            </div>
+
+                            {/* Client Name & Service */}
+                            <div>
+                              <h4 className="text-sm font-semibold text-white tracking-wide truncate">
+                                {record.clientName || 'Visitor'}
+                              </h4>
+                              <p className="text-xs text-gray-300 mt-1 line-clamp-2 leading-relaxed">
+                                {record.service || record.details || 'General Inquiry'}
+                              </p>
+                            </div>
+
+                            {/* Contact Info Pills */}
+                            <div className="space-y-1 text-xs text-gray-400 font-mono">
+                              {record.clientPhone && (
+                                <div className="flex items-center gap-1.5 text-gray-300">
+                                  <Phone size={11} className="text-gold shrink-0" />
+                                  <span className="truncate">{record.clientPhone}</span>
+                                </div>
+                              )}
+                              {record.clientEmail && (
+                                <div className="flex items-center gap-1.5 text-gray-300">
+                                  <Mail size={11} className="text-gold shrink-0" />
+                                  <span className="truncate">{record.clientEmail}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Delivery Status */}
+                            <div>
                               {record.status === 'delivered_via_callmebot' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-500/40">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-950 text-emerald-400 border border-emerald-500/40">
                                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                                  <span>Delivered</span>
+                                  <span>Automated Phone Delivery Verified</span>
                                 </span>
                               ) : record.status === 'callmebot_key_invalid' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-amber-950 text-amber-300 border border-amber-500/40" title="CallMeBot rejected API key - Tap Send to send directly">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950 text-amber-300 border border-amber-500/40">
                                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
-                                  <span>Invalid Key</span>
+                                  <span>Manual Send Required</span>
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-blue-950 text-blue-300 border border-blue-500/40">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-blue-950 text-blue-300 border border-blue-500/40">
                                   <span>1-Click Ready</span>
                                 </span>
                               )}
-                            </td>
-                            <td className="py-2.5 px-3 text-gray-400 text-[10px]">
-                              {new Date(record.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </td>
-                            <td className="py-2.5 px-3 text-right">
-                              <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                            </div>
+                          </div>
+
+                          {/* Card Footer Actions */}
+                          <div className="pt-3 border-t border-white/5 flex items-center justify-between gap-1.5 flex-wrap mt-3">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleNotificationRead(record.id)}
+                              className={`px-2 py-1 text-[10px] font-mono uppercase tracking-wider rounded-sm transition-all cursor-pointer flex items-center gap-1 border ${
+                                isUnread
+                                  ? 'bg-emerald-950/80 hover:bg-emerald-900 border-emerald-500/50 text-emerald-300 font-bold'
+                                  : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border-white/10'
+                              }`}
+                              title={isUnread ? 'Mark this activity as read' : 'Mark as unread'}
+                            >
+                              <CheckCircle2 size={11} className={isUnread ? 'text-emerald-400' : 'text-gray-500'} />
+                              <span>{isUnread ? 'Mark Read' : 'Read'}</span>
+                            </button>
+
+                            <div className="flex items-center gap-1.5">
+                              <a
+                                href={record.directWhatsAppUrl || getOwnerWhatsAppUrl(record)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] uppercase rounded transition-colors shadow-sm"
+                                title="Send formatted executive alert in WhatsApp"
+                              >
+                                <MessageSquare size={11} />
+                                <span>WhatsApp</span>
+                              </a>
+                              {record.clientPhone && (
                                 <a
-                                  href={record.directWhatsAppUrl || getOwnerWhatsAppUrl(record)}
+                                  href={getClientWhatsAppReplyUrl(record.clientPhone, record.clientName, record.service)}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] uppercase rounded transition-colors shadow-sm"
-                                  title={`Open formatted executive alert in WhatsApp for owner (${whatsappConfig.ownerWhatsAppNumber})`}
+                                  className="inline-flex items-center gap-1 px-2 py-1 bg-black-pure border border-emerald-500/40 hover:bg-emerald-950 text-emerald-300 font-bold text-[10px] uppercase rounded transition-colors"
+                                  title="Chat directly with client"
                                 >
-                                  <MessageSquare size={11} />
-                                  <span>Send to WhatsApp</span>
+                                  <span>Reply</span>
                                 </a>
-                                {record.clientPhone && (
-                                  <a
-                                    href={getClientWhatsAppReplyUrl(record.clientPhone, record.clientName, record.service)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-black-pure border border-emerald-500/40 hover:bg-emerald-950 text-emerald-300 font-bold text-[10px] uppercase rounded transition-colors"
-                                    title="Chat directly with client on WhatsApp"
-                                  >
-                                    <span>Reply Client</span>
-                                  </a>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -6708,7 +8170,19 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                   
                   {/* Avatar Area - Synchronized with Nav Bar */}
                   <div className="flex flex-col items-center gap-4 shrink-0">
-                    <div className="w-32 h-32 rounded-full border-2 border-gold flex items-center justify-center bg-black-rich relative shadow-[0_0_25px_rgba(212,175,55,0.25)] overflow-hidden group">
+                    <div 
+                      onClick={() => adminFileInputRef.current?.click()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          adminFileInputRef.current?.click();
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      title="Click directly to upload or change profile photo"
+                      className="w-32 h-32 rounded-full border-2 border-gold hover:border-yellow-300 flex items-center justify-center bg-black-rich relative shadow-[0_0_25px_rgba(212,175,55,0.25)] overflow-hidden group cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-gold"
+                    >
                       {currentAdminAvatar ? (
                         <img 
                           src={currentAdminAvatar} 
@@ -6723,6 +8197,24 @@ export default function AdminDashboard({ onNavigateHome, initialTab }: AdminDash
                           <span className="text-[10px] font-mono uppercase tracking-widest mt-1 text-gold/70">Admin</span>
                         </div>
                       )}
+
+                      {/* Interactive Hover Camera Overlay */}
+                      <div className="absolute inset-0 bg-black/65 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-center text-gold gap-1 p-2 text-center pointer-events-none">
+                        <Camera size={22} className="text-yellow-300 animate-bounce" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-white">
+                          {currentAdminAvatar ? 'Change Photo' : 'Upload Photo'}
+                        </span>
+                        <span className="text-[8px] font-mono text-gold/80">Click directly</span>
+                      </div>
+
+                      {/* Uploading Spinner Overlay */}
+                      {isUploadingAdminPhoto && (
+                        <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center text-gold gap-1.5 z-20 pointer-events-none">
+                          <Loader2 size={24} className="animate-spin text-gold" />
+                          <span className="text-[9px] font-mono font-bold text-white uppercase tracking-wider">Saving...</span>
+                        </div>
+                      )}
+
                       {/* Circular Live Dot at bottom of Profile */}
                       <span className="absolute bottom-2 right-2 flex h-5 w-5 items-center justify-center z-10 pointer-events-none" title="Owner Live">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>

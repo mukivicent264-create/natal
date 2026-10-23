@@ -81,7 +81,9 @@ async function sendAdminEmail(subject: string, fields: Record<string, any>) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'Origin': 'https://nataldesign.com',
+          'Referer': 'https://nataldesign.com/'
         },
         body: JSON.stringify({
           _subject: `[Natal Design Cloud] ${subject}`,
@@ -232,55 +234,38 @@ async function handleLeadCreated(docId: string, data: any) {
 
   // 2. Notify Owner via WhatsApp
   const ownerLines = [
-    `🏛️ *NATAL INTERIOR DESIGN & CONSTRUCTION*`,
-    `🚨 *DATABASE LEAD: ${leadTitle.toUpperCase()}*`,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-    `👤 *Client Name:* ${data.name || 'Valued Client'}`,
-    `📱 *Phone / WhatsApp:* ${data.phone || 'Not provided'}`,
-    `✉️ *Email:* ${data.email || 'Not provided'}`,
-    `🛠️ *Service:* ${data.service || 'Interior Design & Construction'}`,
+    `*NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+    `*Activity:* ${leadTitle}`,
+    `*Name:* ${data.name || 'Client'}`
   ];
-  if (data.details) {
-    ownerLines.push(`📝 *Scope / Message:*`);
-    ownerLines.push(`${data.details}`);
-  }
-  ownerLines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-  ownerLines.push(`⏱️ *Timestamp:* ${new Date().toLocaleString()}`);
-  ownerLines.push(`💾 *Database ID:* ${docId}`);
-  if (data.phone) {
-    ownerLines.push(``);
-    ownerLines.push(`💬 *Direct Reply to Client:* https://wa.me/${normalizePhoneDigits(data.phone)}`);
-  }
-  ownerLines.push(``);
-  ownerLines.push(`_Auto-dispatched from Natal Design Cloud Database._`);
+  if (data.phone) ownerLines.push(`*Phone:* ${data.phone}`);
+  if (data.email) ownerLines.push(`*Email:* ${data.email}`);
+  if (data.service) ownerLines.push(`*Service:* ${data.service}`);
+  if (data.details) ownerLines.push(`*Details:* ${data.details}`);
+  ownerLines.push(`*Date:* ${new Date().toLocaleString()}`);
 
   const ownerMessage = ownerLines.join('\n');
   const waResult = await sendWhatsAppMessage(activeSettings.ownerPhone, ownerMessage);
   const directWhatsAppUrl = `https://wa.me/${activeSettings.ownerPhone}?text=${encodeURIComponent(ownerMessage)}`;
 
-  // 3. If client provided phone, send automatic confirmation receipt to client!
+  // 3. If client provided phone, send automatic confirmation receipt to client
   if (data.phone && data.phone.trim()) {
     const clientPhoneDigits = normalizePhoneDigits(data.phone);
     const clientLines = [
-      `🏛️ *NATAL INTERIOR DESIGN & CONSTRUCTION*`,
-      `*Inquiry Received & Confirmed*`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `Dear *${data.name || 'Valued Client'}*,`,
+      `*NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+      `*Inquiry Received*`,
       ``,
-      `Thank you for contacting Natal Interior Design & Construction! 🤝`,
-      `We have successfully received your inquiry in our database.`,
+      `Dear ${data.name || 'Client'},`,
       ``,
-      `📋 *Summary:*`,
-      `• *Service:* ${data.service || 'Interior Design & Construction'}`,
-      `• *Status:* Under Review by Senior Design & Engineering Team`,
-      `• *Expected Response:* Within 2 Business Hours`,
+      `Thank you for contacting Natal Interior Design & Construction. We have received your inquiry.`,
       ``,
-      `Our team in Kampala will reach out to you directly with your customized project assessment.`,
+      `*Service:* ${data.service || 'Interior Design & Construction'}`,
+      `*Status:* Under review by our design team`,
       ``,
-      `💬 *Studio Desk:* +256 ${activeSettings.ownerPhone}`,
-      `🌐 Kampala, Uganda`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `_Automated confirmation receipt from Natal Design Web Portal._`
+      `Our team will contact you shortly.`,
+      ``,
+      `Natal Interior Design & Construction`,
+      `Kampala, Uganda`
     ];
     await sendWhatsAppMessage(clientPhoneDigits, clientLines.join('\n'));
   }
@@ -327,26 +312,34 @@ async function handleActivityCreated(docId: string, data: any) {
 
   console.log(`[Server Triggers] ⚡ Processing user activity [${docId}]: ${data.title} (${data.type})`);
 
-  // Notify Owner via WhatsApp for critical activities
+  // 1. Notify Admin via Email for activities
+  await sendAdminEmail(`Activity Alert: ${data.title || 'Client Action'}`, {
+    'Activity': data.title || 'Client Interaction',
+    'Activity Type': data.type || 'Interaction',
+    'Client / Visitor': data.userName || data.userEmail || 'Website Visitor',
+    'Phone / WhatsApp': data.userPhone || 'Not provided',
+    'Email Address': data.userEmail || 'Not provided',
+    'Activity Details': data.description || 'User performed interaction on website',
+    'Document ID': docId,
+    'Database Collection': 'user_activities'
+  });
+
+  // 2. Notify Owner via WhatsApp for critical activities
   const lines = [
-    `🏛️ *NATAL INTERIOR DESIGN & CONSTRUCTION*`,
-    `⚡ *REAL-TIME USER ACTIVITY DETECTED*`,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-    `📌 *Activity:* ${data.title || 'Client Action'}`,
-    `👤 *User:* ${data.userName || data.userEmail || 'Website Visitor'}`,
+    `*NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+    `*Activity:* ${data.title || data.type || 'Client Activity'}`,
+    `*Name:* ${data.userName || data.userEmail || 'Client'}`
   ];
   if (data.userPhone) {
-    lines.push(`📱 *Phone:* ${data.userPhone}`);
+    lines.push(`*Phone:* ${data.userPhone}`);
   }
   if (data.userEmail) {
-    lines.push(`✉️ *Email:* ${data.userEmail}`);
+    lines.push(`*Email:* ${data.userEmail}`);
   }
   if (data.description) {
-    lines.push(`📝 *Details:* ${data.description}`);
+    lines.push(`*Details:* ${data.description}`);
   }
-  lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-  lines.push(`⏱️ *Logged At:* ${data.timestamp || new Date().toLocaleString()}`);
-  lines.push(`_Database Source: Firestore user_activities_`);
+  lines.push(`*Date:* ${data.timestamp || new Date().toLocaleString()}`);
 
   await sendWhatsAppMessage(activeSettings.ownerPhone, lines.join('\n'));
 
@@ -387,36 +380,42 @@ async function handleUserCreated(docId: string, data: any) {
 
   // 2. WhatsApp Owner
   const lines = [
-    `🏛️ *NATAL INTERIOR DESIGN & CONSTRUCTION*`,
-    `👑 *NEW VIP CLIENT REGISTERED*`,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-    `👤 *Client Name:* ${data.name || 'Valued VIP Member'}`,
-    `✉️ *Email:* ${data.email}`,
-    `📱 *Phone:* ${data.phone || 'Not provided'}`,
-    `🏷️ *Tier:* ${data.vipTier || 'VIP Gold Member'}`,
-    `🏰 *Property:* ${data.projectType || 'General'}`,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-    `⏱️ *Registered:* ${new Date().toLocaleString()}`,
-    `_Database Source: Firestore users collection_`
+    `*NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+    `*Activity:* Client Registration`,
+    `*Name:* ${data.name || 'Client'}`
   ];
+  if (data.phone) {
+    lines.push(`*Phone:* ${data.phone}`);
+  }
+  if (data.email) {
+    lines.push(`*Email:* ${data.email}`);
+  }
+  if (data.vipTier) {
+    lines.push(`*Tier:* ${data.vipTier}`);
+  }
+  if (data.projectType) {
+    lines.push(`*Project Type:* ${data.projectType}`);
+  }
+  if (data.service) {
+    lines.push(`*Service:* ${data.service}`);
+  }
+  lines.push(`*Date:* ${new Date().toLocaleString()}`);
+
   await sendWhatsAppMessage(activeSettings.ownerPhone, lines.join('\n'));
 
   // 3. WhatsApp Welcome Confirmation to Client if phone exists
   if (data.phone && data.phone.trim()) {
     const clientPhone = normalizePhoneDigits(data.phone);
     const welcome = [
-      `🏛️ *NATAL INTERIOR DESIGN & CONSTRUCTION*`,
-      `*Welcome to VIP Atelier Membership* 👑`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `Dear *${data.name || 'Valued Client'}*,`,
+      `*NATAL INTERIOR DESIGN & CONSTRUCTION*`,
+      `*Welcome to Natal Interior Design*`,
       ``,
-      `Welcome to Natal Interior Design & Construction! Your VIP account has been successfully initialized in our portal.`,
+      `Dear ${data.name || 'Client'},`,
       ``,
-      `You now have priority access to custom 3D architectural renders, direct structural consultations, and executive project tracking.`,
+      `Your account has been successfully created. You now have access to project tracking and direct consultations with our design team.`,
       ``,
-      `📞 *Concierge Desk:* +256 745 694 499 / +256 777 568 259`,
-      `🌐 Kampala, Uganda`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━`
+      `Natal Interior Design & Construction`,
+      `Kampala, Uganda`
     ];
     await sendWhatsAppMessage(clientPhone, welcome.join('\n'));
   }

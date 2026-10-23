@@ -200,6 +200,34 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
       }, () => {});
     } catch {}
 
+    let unsubAdminProfile: (() => void) | undefined;
+    try {
+      unsubAdminProfile = onSnapshot(doc(db, 'site_settings', 'admin_profile'), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data) {
+            const current = getAdminProfile();
+            const updated = {
+              ...current,
+              name: data.name || current.name,
+              email: data.email || current.email,
+              role: data.role || current.role || 'Full System Access',
+              photoURL: data.photoURL !== undefined ? (data.photoURL || undefined) : current.photoURL
+            };
+            if (data.photoURL) {
+              localStorage.setItem('natal_user_avatar', data.photoURL);
+              localStorage.setItem('natal_admin_avatar', data.photoURL);
+            } else if (data.photoURL === null || data.photoURL === '') {
+              localStorage.removeItem('natal_user_avatar');
+              localStorage.removeItem('natal_admin_avatar');
+            }
+            localStorage.setItem('natal_admin_profile', JSON.stringify(updated));
+            setDirVersion(v => v + 1);
+          }
+        }
+      }, () => {});
+    } catch {}
+
     return () => {
       window.removeEventListener('natal_user_session_changed', handleSessionChange);
       window.removeEventListener('natal_admin_profile_changed', handleAdminProfileChange);
@@ -207,6 +235,7 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('natal_owner_presence_changed', handleOwnerLive);
       if (unsubPresence) unsubPresence();
+      if (unsubAdminProfile) unsubAdminProfile();
       unsubscribe();
     };
   }, []);
@@ -249,6 +278,10 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
         }
       };
       reader.readAsDataURL(file);
+    } finally {
+      if (e.target) {
+        e.target.value = '';
+      }
     }
   };
 
@@ -385,8 +418,8 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                     </div>
                   </button>
 
-                  {/* Circular Live Dot on Top of Admin Profile */}
-                  <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none" title="Owner Live">
+                  {/* Circular Live Dot at Bottom of Admin Profile */}
+                  <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none" title="Owner Live">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
                   </span>
@@ -403,19 +436,34 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                       >
                         {/* Header info */}
                         <div className="flex items-center gap-3 pb-3 border-b border-white/10">
-                          <div className="relative shrink-0">
-                            <div className="w-11 h-11 rounded-full overflow-hidden border border-gold/70 flex items-center justify-center bg-black-pure text-gold font-bold font-mono text-sm shadow-md">
+                          <div className="relative shrink-0 group/adminavatar">
+                            <div 
+                              onClick={() => fileInputRef.current?.click()}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  fileInputRef.current?.click();
+                                }
+                              }}
+                              title="Click directly to upload profile photo"
+                              className="w-11 h-11 rounded-full overflow-hidden border border-gold/70 hover:border-gold flex items-center justify-center bg-black-pure text-gold font-bold font-mono text-sm shadow-md cursor-pointer transition-all relative"
+                            >
                               {displayAvatar ? (
                                 <img 
                                   src={displayAvatar} 
                                   alt={displayName} 
-                                  className="w-full h-full object-cover"
+                                  className="w-full h-full object-cover transition-transform duration-200 group-hover/adminavatar:scale-105" 
                                 />
                               ) : (
                                 <span>{initials}</span>
                               )}
+                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/adminavatar:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                                <Camera size={13} className="text-yellow-300" />
+                              </div>
                             </div>
-                            <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
+                            <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center pointer-events-none">
                               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure"></span>
                             </span>
                           </div>
@@ -524,8 +572,8 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                     </div>
                   </button>
 
-                  {/* Circular Live Dot on Top of User Profile */}
-                  <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none" title="Live">
+                  {/* Circular Live Dot at Bottom of User Profile */}
+                  <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none" title="Live">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
                   </span>
@@ -558,20 +606,35 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
 
                         {/* Header info */}
                         <div className="flex items-center gap-3 pb-3 border-b border-white/10">
-                        <div className="relative shrink-0">
-                          <div className="w-11 h-11 rounded-full overflow-hidden border border-gold/70 flex items-center justify-center bg-black-pure text-gold font-bold font-mono text-sm shadow-md">
+                        <div className="relative shrink-0 group/clientavatar">
+                          <div 
+                            onClick={() => fileInputRef.current?.click()}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                fileInputRef.current?.click();
+                              }
+                            }}
+                            title="Click directly to upload profile photo"
+                            className="w-11 h-11 rounded-full overflow-hidden border border-gold/70 hover:border-gold flex items-center justify-center bg-black-pure text-gold font-bold font-mono text-sm shadow-md cursor-pointer transition-all relative"
+                          >
                             {displayAvatar ? (
                               <img 
                                 src={displayAvatar} 
                                 alt={displayName} 
-                                className="w-full h-full object-cover"
+                                className="w-full h-full object-cover transition-transform duration-200 group-hover/clientavatar:scale-105" 
                               />
                             ) : (
                               <span>{initials}</span>
                             )}
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/clientavatar:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                              <Camera size={13} className="text-yellow-300" />
+                            </div>
                           </div>
-                          {/* Active badge */}
-                          <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center">
+                          {/* Active badge at bottom */}
+                          <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center pointer-events-none">
                             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure"></span>
                           </span>
                         </div>
@@ -795,8 +858,8 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                                 <span>{initials}</span>
                               )}
                             </div>
-                            {/* Circular Live Dot on top of avatar */}
-                            <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none">
+                            {/* Circular Live Dot at bottom of avatar */}
+                            <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
                               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
                             </span>
@@ -849,8 +912,8 @@ export default function Navbar({ onNavigateHome, onNavigateToAuth }: NavbarProps
                               <span>{initials}</span>
                             )}
                           </div>
-                          {/* Circular Live dot on top of avatar */}
-                          <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none">
+                          {/* Circular Live dot at bottom of avatar */}
+                          <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center pointer-events-none">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
                             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black-pure shadow-[0_0_8px_rgba(16,185,129,0.9)]"></span>
                           </span>
